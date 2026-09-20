@@ -1,0 +1,464 @@
+ examples/connect_four.py | 54 ++++++++++++++++++++++++++++--------------------
+ examples/haunted_ci.py   |  4 +++-
+ pyjev/cli.py             |  3 +++
+ pyjev/client.py          | 14 ++++++++++---
+ pyjev/compile.py         |  9 +++++++-
+ tests/test_async.py      |  9 +++++++-
+ tests/test_bundles.py    | 23 ++++++++++++++++-----
+ tests/test_client.py     | 30 ++++++++++++++++-----------
+ 8 files changed, 101 insertions(+), 45 deletions(-)
+
+diff --git a/examples/connect_four.py b/examples/connect_four.py
+index d9bcdeb..8af502d 100644
+--- a/examples/connect_four.py
++++ b/examples/connect_four.py
+@@ -4,6 +4,7 @@ import argparse
+ import json
+ from dataclasses import dataclass, field
+ from pathlib import Path
++from typing import cast
+
+ from pyjev import ChoiceResult, Jev
+
+@@ -336,13 +337,13 @@ def scan_tactics(board: list[list[str]], piece: str, opponent: str) -> TacticalS
+     safe = [column for column in legal if not analyses[column]["opponent_winning_replies"]]
+     opponent_wins_now = winning_columns(board, opponent)
+     if not safe:
+-        rejected = {column: ["immediate-opponent-win"] for column in legal}
++        forced_rejected = {column: ["immediate-opponent-win"] for column in legal}
+         return TacticalSelection(
+             legal,
+             legal,
+             "forced-loss-or-no-safe-one-ply-move",
+             [],
+-            rejected,
++            forced_rejected,
+             analyses,
+             forcing_proofs,
+         )
+@@ -369,12 +370,12 @@ def scan_tactics(board: list[list[str]], piece: str, opponent: str) -> TacticalS
+         )
+
+     deep_safe = [column for column in safe if not forcing_proofs[column]]
+-    rejected: dict[int, list[str]] = {}
++    deep_rejected: dict[int, list[str]] = {}
+     for column in legal:
+         if column not in safe:
+-            rejected[column] = ["immediate-opponent-win"]
++            deep_rejected[column] = ["immediate-opponent-win"]
+         elif column not in deep_safe:
+-            rejected[column] = ["opponent-forcing-reply"]
++            deep_rejected[column] = ["opponent-forcing-reply"]
+
+     if deep_safe and len(deep_safe) < len(safe):
+         return TacticalSelection(
+@@ -382,7 +383,7 @@ def scan_tactics(board: list[list[str]], piece: str, opponent: str) -> TacticalS
+             deep_safe,
+             "avoid-forced-loss-next-turn",
+             constraints + ["avoid-forced-loss-next-turn"],
+-            rejected,
++            deep_rejected,
+             analyses,
+             forcing_proofs,
+         )
+@@ -392,7 +393,7 @@ def scan_tactics(board: list[list[str]], piece: str, opponent: str) -> TacticalS
+             safe,
+             "forced-loss-next-turn-or-no-deep-safe-move",
+             constraints,
+-            {column: reasons for column, reasons in rejected.items() if column not in safe},
++            {column: reasons for column, reasons in deep_rejected.items() if column not in safe},
+             analyses,
+             forcing_proofs,
+         )
+@@ -400,7 +401,7 @@ def scan_tactics(board: list[list[str]], piece: str, opponent: str) -> TacticalS
+         reason = "forced-defense" if opponent_wins_now else "avoid-immediate-loss"
+     else:
+         reason = "strategic-choice"
+-    return TacticalSelection(legal, deep_safe, reason, constraints, rejected, analyses, forcing_proofs)
++    return TacticalSelection(legal, deep_safe, reason, constraints, deep_rejected, analyses, forcing_proofs)
+
+
+ def tactical_candidates(
+@@ -607,7 +608,13 @@ def _analysis_winning_columns(selection: TacticalSelection, key: str) -> list[in
+     """Internal compatibility helper for compact terminal output."""
+     if key == "wins_now":
+         return [column + 1 for column, analysis in selection.analyses.items() if analysis["wins_now"]]
+-    return sorted({reply for analysis in selection.analyses.values() for reply in analysis["opponent_winning_replies"]})
++    return sorted(
++        {
++            reply
++            for analysis in selection.analyses.values()
++            for reply in cast(list[int], analysis["opponent_winning_replies"])
++        }
++    )
+
+
+ def print_tactical_debug(
+@@ -635,12 +642,12 @@ def print_tactical_debug(
+         analysis = selection.analyses[column]
+         print(f"\ncandidate {column + 1}:")
+         print(f"  wins now: {'yes' if analysis['wins_now'] else 'no'}")
+-        immediate = analysis["opponent_winning_replies"]
++        immediate = cast(list[int], analysis["opponent_winning_replies"])
+         print("  opponent immediate wins after move: " + (" ".join(map(str, immediate)) or "none"))
+         forcing = selection.forcing_reply_proofs.get(column, {})
+         if forcing:
+             formatted = " ".join(
+-                f"{reply + 1}->[{', '.join(map(str, proof['opponent_winning_columns_next']))}]"
++                f"{reply + 1}->[{', '.join(map(str, cast(list[int], proof['opponent_winning_columns_next'])))}]"
+                 for reply, proof in sorted(forcing.items())
+             )
+             print(f"  forcing opponent replies (opponent forcing replies): {formatted}")
+@@ -665,25 +672,28 @@ def print_forcing_proof(candidate: int, reply: int, proof: dict[str, object]) ->
+     """Print one exact candidate -> reply -> response proof."""
+     print(f"\nproof: candidate {candidate + 1} -> opponent reply {reply + 1}")
+     print("board after opponent reply:")
+-    for row in proof["board_after_reply"]:
++    board_after_reply = cast(list[str], proof["board_after_reply"])
++    for row in board_after_reply:
+         print("  " + " ".join(row))
+-    print(
+-        "opponent immediate winning columns next: "
+-        + (" ".join(map(str, proof["opponent_winning_columns_next"])) or "none")
+-    )
++    next_wins = cast(list[int], proof["opponent_winning_columns_next"])
++    escape_responses = cast(list[int], proof["escape_responses"])
++    forces_loss = cast(bool, proof["forces_loss_next_turn"])
++    print("opponent immediate winning columns next: " + (" ".join(map(str, next_wins)) or "none"))
+     print("our legal responses:")
+-    response_analysis = proof["response_analysis"]
+-    for response, details in response_analysis.items():
+-        if details["wins_now"]:
++    response_analysis = cast(dict[str, dict[str, object]], proof["response_analysis"])
++    for response, raw_details in response_analysis.items():
++        details = raw_details
++        wins_now = cast(bool, details["wins_now"])
++        if wins_now:
+             print(f"  {response} -> own immediate win (escape)")
+         else:
+-            wins = details["opponent_winning_replies"]
++            wins = cast(list[int], details["opponent_winning_replies"])
+             print(f"  {response} -> opponent still wins: " + (" ".join(map(str, wins)) or "none"))
+-    print("escape responses: " + (" ".join(map(str, proof["escape_responses"])) or "none"))
++    print("escape responses: " + (" ".join(map(str, escape_responses)) or "none"))
+     print(
+         "proof result: opponent reply "
+         + str(reply + 1)
+-        + (" forces loss next turn" if proof["forces_loss_next_turn"] else " is not forcing")
++        + (" forces loss next turn" if forces_loss else " is not forcing")
+     )
+
+
+diff --git a/examples/haunted_ci.py b/examples/haunted_ci.py
+index 929035d..6a436c6 100644
+--- a/examples/haunted_ci.py
++++ b/examples/haunted_ci.py
+@@ -5,7 +5,7 @@ from __future__ import annotations
+ import json
+ from pathlib import Path
+
+-from pyjev import Jev
++from pyjev import Jev, ScoreResult
+
+ CONFIG = Path(__file__).with_name(".pyjev.toml")
+ DECISION = "haunted-ci"
+@@ -43,6 +43,8 @@ def main() -> None:
+             config=CONFIG,
+         )
+
++        if not isinstance(result, ScoreResult):
++            raise TypeError(f"Expected a ScoreResult, got {type(result).__name__}")
+     print("\nStructured result:")
+     print(f"  score       {result.value:.2f}")
+     print(f"  confidence  {result.confidence:.2f}")
+diff --git a/pyjev/cli.py b/pyjev/cli.py
+index 3e07859..4ad8379 100644
+--- a/pyjev/cli.py
++++ b/pyjev/cli.py
+@@ -184,6 +184,9 @@ def _emit_gated_result(
+     if isinstance(result, NoulResult):
+         _emit_result(result, json_output=json_output, value_only=value_only)
+         return
++    if isinstance(result, BundleResult):
++        _emit_result(result, json_output=json_output, value_only=value_only)
++        return
+     if minimum is not None and _gate_failed(result.confidence, minimum):
+         _emit_gate_failure(result, minimum=minimum, json_output=json_output)
+     _emit_result(result, json_output=json_output, value_only=value_only)
+diff --git a/pyjev/client.py b/pyjev/client.py
+index 0574ffc..94ce03f 100644
+--- a/pyjev/client.py
++++ b/pyjev/client.py
+@@ -5,7 +5,7 @@ from __future__ import annotations
+ from collections.abc import Mapping, Sequence
+ from pathlib import Path
+ from types import TracebackType
+-from typing import Any
++from typing import Any, overload
+
+ from typesafe_sdk import AsyncTypeSafeClient, Question, TypeSafeClient
+
+@@ -28,6 +28,14 @@ def _usage(response: Any) -> dict[str, Any]:
+     return response.usage.model_dump(mode="json")
+
+
++@overload
++def _primitive_result(response: Any, name: str, decision: NoulDecision) -> NoulResult: ...
++@overload
++def _primitive_result(response: Any, name: str, decision: ChoiceDecision) -> ChoiceResult: ...
++@overload
++def _primitive_result(response: Any, name: str, decision: ScoreDecision) -> ScoreResult: ...
++
++
+ def _primitive_result(
+     response: Any,
+     name: str,
+@@ -126,7 +134,7 @@ class Jev:
+             questions={"answer": build_noul(question, true=true, false=false)},
+             model=model,
+         )
+-        return _primitive_result(response, "answer", NoulDecision("answer", str(question), true, false, model))  # type: ignore[arg-type]
++        return _primitive_result(response, "answer", NoulDecision("answer", str(question), true, false, model))
+
+     def choice(
+         self,
+@@ -160,7 +168,7 @@ class Jev:
+             questions={"answer": build_score(question, values)},
+             model=model,
+         )
+-        return _primitive_result(response, "answer", ScoreDecision("answer", str(question), tuple(values)))  # type: ignore[arg-type]
++        return _primitive_result(response, "answer", ScoreDecision("answer", str(question), tuple(values)))
+
+     def decide(
+         self,
+diff --git a/pyjev/compile.py b/pyjev/compile.py
+index b6ce0c1..f2ae032 100644
+--- a/pyjev/compile.py
++++ b/pyjev/compile.py
+@@ -94,12 +94,19 @@ class CompiledDecision:
+             },
+             "request": {
+                 "state": self.state,
+-                "questions": {name: question.model_dump(mode="json") for name, question in self.questions.items()},
++                "questions": {name: _question_to_dict(question) for name, question in self.questions.items()},
+                 "model": self.model,
+             },
+         }
+
+
++def _question_to_dict(question: Question) -> dict[str, Any]:
++    """Serialize either an SDK question model or its raw dictionary form."""
++    if isinstance(question, (Noul, Choice, Score)):
++        return question.model_dump(mode="json")
++    return dict(question)
++
++
+ def compile_decision(
+     name: str,
+     *,
+diff --git a/tests/test_async.py b/tests/test_async.py
+index e0dda45..e865017 100644
+--- a/tests/test_async.py
++++ b/tests/test_async.py
+@@ -2,6 +2,9 @@ from __future__ import annotations
+
+ import asyncio
+ from types import SimpleNamespace
++from typing import cast
++
++from typesafe_sdk import AsyncTypeSafeClient
+
+ from pyjev import AsyncJev
+
+@@ -47,10 +50,14 @@ class AsyncClient:
+         self.closed = True
+
+
++def _as_client(client: AsyncClient) -> AsyncTypeSafeClient:
++    return cast(AsyncTypeSafeClient, client)
++
++
+ def test_async_choice_uses_native_async_client():
+     async def run() -> None:
+         client = AsyncClient()
+-        jev = AsyncJev(client=client)
++        jev = AsyncJev(client=_as_client(client))
+         result = await jev.choice("Choose", state="state", choices=["yes", "no"])
+         assert result.value == "yes"
+         assert len(client.calls) == 1
+diff --git a/tests/test_bundles.py b/tests/test_bundles.py
+index 5b9c314..a8aec82 100644
+--- a/tests/test_bundles.py
++++ b/tests/test_bundles.py
+@@ -2,11 +2,13 @@ from __future__ import annotations
+
+ from pathlib import Path
+ from types import SimpleNamespace
++from typing import cast
+
+ import pytest
+ from typer.testing import CliRunner
++from typesafe_sdk import TypeSafeClient
+
+-from pyjev import BundleResult, Jev
++from pyjev import BundleResult, ChoiceResult, Jev, ScoreResult
+ from pyjev.cli import app
+ from pyjev.decisions import BundleDecision, DecisionConfigError, load_decision
+
+@@ -64,6 +66,10 @@ class BundleClient:
+         pass
+
+
++def _as_client(client: BundleClient) -> TypeSafeClient:
++    return cast(TypeSafeClient, client)
++
++
+ def bundle_config(tmp_path: Path, *, child_model: bool = False) -> Path:
+     child_model_text = '\nmodel = "child-model"' if child_model else ""
+     path = tmp_path / ".pyjev.toml"
+@@ -109,13 +115,20 @@ def test_bundle_parser_preserves_child_keys_and_rejects_child_models(tmp_path: P
+
+ def test_bundle_uses_one_call_and_preserves_each_result(tmp_path: Path) -> None:
+     client = BundleClient()
+-    result = Jev(client=client).decide("ticket-triage", state={"ticket": "down"}, config=bundle_config(tmp_path))
++    result = Jev(client=_as_client(client)).decide(
++        "ticket-triage",
++        state={"ticket": "down"},
++        config=bundle_config(tmp_path),
++    )
+     assert isinstance(result, BundleResult)
+     assert len(client.calls) == 1
+     assert list(result.answers) == ["refund", "route", "urgency"]
+-    assert result.answers["refund"].value == 0.81
+-    assert result.answers["route"].probabilities["engineering"] == 0.91
+-    assert result.answers["urgency"].legend[3] == "critical"
++    route = result.answers["route"]
++    assert isinstance(route, ChoiceResult)
++    assert route.probabilities["engineering"] == 0.91
++    urgency = result.answers["urgency"]
++    assert isinstance(urgency, ScoreResult)
++    assert urgency.legend[3] == "critical"
+     assert result.request_id == "request-bundle"
+
+
+diff --git a/tests/test_client.py b/tests/test_client.py
+index b271136..b0c6268 100644
+--- a/tests/test_client.py
++++ b/tests/test_client.py
+@@ -1,8 +1,10 @@
+ from __future__ import annotations
+
+ from types import SimpleNamespace
++from typing import cast
+
+ import pytest
++from typesafe_sdk import TypeSafeClient
+
+ from pyjev import Jev
+
+@@ -69,9 +71,13 @@ class FakeClient:
+         self.closed = True
+
+
++def _as_client(client: FakeClient) -> TypeSafeClient:
++    return cast(TypeSafeClient, client)
++
++
+ def test_noul_result():
+     client = FakeClient()
+-    jev = Jev(client=client)
++    jev = Jev(client=_as_client(client))
+     result = jev.ask("Is it billing?", state="charged twice")
+     assert result.value == 0.91
+     assert result.to_dict()["noul"] == 0.91
+@@ -80,7 +86,7 @@ def test_noul_result():
+
+
+ def test_choice_result_preserves_confidence_and_probabilities():
+-    jev = Jev(client=FakeClient())
++    jev = Jev(client=_as_client(FakeClient()))
+     result = jev.choice(
+         "Route it",
+         state="checkout fails",
+@@ -92,7 +98,7 @@ def test_choice_result_preserves_confidence_and_probabilities():
+
+
+ def test_score_result():
+-    jev = Jev(client=FakeClient())
++    jev = Jev(client=_as_client(FakeClient()))
+     result = jev.score("Urgency?", state="prod down", levels=["low", "normal", "urgent", "critical"])
+     assert result.value == 2.7
+     assert result.confidence == 0.88
+@@ -100,7 +106,7 @@ def test_score_result():
+
+
+ def test_run_keeps_mixed_request_shape():
+-    jev = Jev(client=FakeClient())
++    jev = Jev(client=_as_client(FakeClient()))
+     result = jev.run(
+         state="hello",
+         questions={"q": {"type": "noul", "instructions": "Greeting?"}},
+@@ -109,12 +115,12 @@ def test_run_keeps_mixed_request_shape():
+
+
+ def test_models():
+-    jev = Jev(client=FakeClient())
++    jev = Jev(client=_as_client(FakeClient()))
+     assert jev.models()[0]["name"] == "jev-test"
+
+
+ def test_request_id_is_preserved():
+-    result = Jev(client=FakeClient()).ask("Question?", state="state")
++    result = Jev(client=_as_client(FakeClient())).ask("Question?", state="state")
+     assert result.request_id == "request-123"
+     assert result.to_dict()["request_id"] == "request-123"
+
+@@ -123,14 +129,14 @@ def test_request_id_is_preserved():
+ def test_invalid_choice_sequence_makes_no_api_call(choices):
+     client = FakeClient()
+     with pytest.raises(ValueError):
+-        Jev(client=client).choice("Route?", state="state", choices=choices)
++        Jev(client=_as_client(client)).choice("Route?", state="state", choices=choices)
+     assert client.calls == []
+
+
+ def test_choice_rejects_256_options_without_api_call():
+     client = FakeClient()
+     with pytest.raises(ValueError, match="255"):
+-        Jev(client=client).choice("Route?", state="state", choices=[str(i) for i in range(256)])
++        Jev(client=_as_client(client)).choice("Route?", state="state", choices=[str(i) for i in range(256)])
+     assert client.calls == []
+
+
+@@ -138,13 +144,13 @@ def test_choice_rejects_256_options_without_api_call():
+ def test_invalid_score_levels_make_no_api_call(levels):
+     client = FakeClient()
+     with pytest.raises(ValueError, match="2 and 10"):
+-        Jev(client=client).score("Score?", state="state", levels=levels)
++        Jev(client=_as_client(client)).score("Score?", state="state", levels=levels)
+     assert client.calls == []
+
+
+ def test_injected_client_rejects_constructor_options():
+     with pytest.raises(ValueError, match="injected client"):
+-        Jev(client=FakeClient(), model="model")
++        Jev(client=_as_client(FakeClient()), model="model")
+
+
+ def test_named_decision_dispatch_uses_explicit_model_override(tmp_path):
+@@ -155,7 +161,7 @@ def test_named_decision_dispatch_uses_explicit_model_override(tmp_path):
+         encoding="utf-8",
+     )
+     client = FakeClient()
+-    result = Jev(client=client).decide("route", state="ticket", config=config, model="call-model")
++    result = Jev(client=_as_client(client)).decide("route", state="ticket", config=config, model="call-model")
+     assert result.value == "engineering"
+     assert client.calls[-1][2] == "call-model"
+
+@@ -168,5 +174,5 @@ def test_named_decision_uses_config_model_when_call_model_absent(tmp_path):
+         encoding="utf-8",
+     )
+     client = FakeClient()
+-    Jev(client=client).decide("route", state="ticket", config=config)
++    Jev(client=_as_client(client)).decide("route", state="ticket", config=config)
+     assert client.calls[-1][2] == "decision-model"

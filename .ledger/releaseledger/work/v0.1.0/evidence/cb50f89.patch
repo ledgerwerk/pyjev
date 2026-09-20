@@ -1,0 +1,1805 @@
+ .github/workflows/ci.yml       |  73 +++++++++
+ .pre-commit-config.yaml        |   2 +-
+ README.md                      | 270 ++++++++++++++++-----------------
+ pyjev/__init__.py              |  30 +++-
+ pyjev/cli.py                   | 336 ++++++++++++++++++++++++++++++++---------
+ pyjev/client.py                |  92 +++++++++--
+ pyjev/decisions.py             | 234 ++++++++++++++++++++++++++++
+ pyjev/results.py               |   9 +-
+ pyproject.toml                 |   6 +
+ tests/test_client.py           |  62 ++++++++
+ tests/test_decisions.py        | 109 +++++++++++++
+ tests/test_release_contract.py | 168 +++++++++++++++++++++
+ 12 files changed, 1155 insertions(+), 236 deletions(-)
+
+diff --git a/.github/workflows/ci.yml b/.github/workflows/ci.yml
+new file mode 100644
+index 0000000..111fa4b
+--- /dev/null
++++ b/.github/workflows/ci.yml
+@@ -0,0 +1,73 @@
++name: CI
++
++on:
++  push:
++  pull_request:
++
++jobs:
++  test:
++    name: Python ${{ matrix.python-version }}
++    runs-on: ubuntu-latest
++    strategy:
++      fail-fast: false
++      matrix:
++        python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
++    steps:
++      - uses: actions/checkout@v4
++        with:
++          fetch-depth: 0
++      - uses: actions/setup-python@v5
++        with:
++          python-version: ${{ matrix.python-version }}
++      - name: Install project and development tools
++        run: python -m pip install -U pip && python -m pip install -e '.[dev]'
++      - name: Lint
++        run: ruff check .
++      - name: Test
++        run: pytest
++
++  package:
++    name: Build and smoke-test packages
++    runs-on: ubuntu-latest
++    needs: test
++    steps:
++      - uses: actions/checkout@v4
++        with:
++          fetch-depth: 0
++      - uses: actions/setup-python@v5
++        with:
++          python-version: "3.14"
++      - name: Install packaging tools
++        run: python -m pip install -U pip && python -m pip install -e '.[dev]'
++      - name: Build distributions
++        run: python -m build
++      - name: Check distributions
++        run: twine check dist/*
++      - name: Verify tagged release version
++        if: startsWith(github.ref, 'refs/tags/v0.1.0')
++        run: |
++          test "$(python -c 'import pyjev; print(pyjev.__version__)')" = "0.1.0"
++          python - <<'PY'
++          from pathlib import Path
++          import zipfile
++          import tarfile
++
++          wheels = list(Path("dist").glob("*.whl"))
++          sdists = list(Path("dist").glob("*.tar.gz"))
++          assert len(wheels) == 1 and wheels[0].name.startswith("pyjev-0.1.0-")
++          assert len(sdists) == 1 and sdists[0].name == "pyjev-0.1.0.tar.gz"
++          with zipfile.ZipFile(wheels[0]) as archive:
++              names = set(archive.namelist())
++              assert "pyjev/py.typed" in names
++          with tarfile.open(sdists[0]) as archive:
++              names = archive.getnames()
++              assert any(name.endswith("/pyjev/py.typed") for name in names)
++          PY
++      - name: Smoke-test installed wheel
++        run: |
++          python -m venv /tmp/pyjev-wheel-env
++          /tmp/pyjev-wheel-env/bin/python -m pip install dist/*.whl
++          /tmp/pyjev-wheel-env/bin/pyjev --version
++          /tmp/pyjev-wheel-env/bin/pyjev --help
++          /tmp/pyjev-wheel-env/bin/pyjev decision --help
++          /tmp/pyjev-wheel-env/bin/python -c "import pyjev; print(pyjev.__version__)"
+diff --git a/.pre-commit-config.yaml b/.pre-commit-config.yaml
+index 238d648..b53cd4a 100644
+--- a/.pre-commit-config.yaml
++++ b/.pre-commit-config.yaml
+@@ -22,7 +22,7 @@ repos:
+     hooks:
+       - id: ruff-check
+         name: ruff check
+-        entry: ruff check --fix --exit-non-zero-on-fix --config=.ruff.toml --force-exclude
++        entry: ruff check --fix --exit-non-zero-on-fix --config=pyproject.toml --force-exclude
+         language: system
+         types_or: [python, pyi]
+       - id: ruff-format
+diff --git a/README.md b/README.md
+index f64e735..45d1e84 100644
+--- a/README.md
++++ b/README.md
+@@ -2,58 +2,54 @@
+
+ Reusable, confidence-aware [Jev](https://docs.typesafe.ai/introduction) decisions for Python and the shell.
+
+-`pyjev` is intentionally a thin convenience layer over TypeSafe's official `typesafe-sdk`. It does not reimplement the HTTP API.
+-
+-## MVP features
+-
+-- flat package layout (`pyjev/`, no `src/` directory)
+-- dynamic versions from Git tags via `setuptools-scm`
+-- Python API for Noul, Choice, Score, and mixed-question requests
+-- `pyjev` CLI with stdin/file support and JSON output
+-- API-key lookup from `TYPESAFE_API_KEY` or the OS keyring
+-- confidence gating for Choice and Score (`--min-confidence` exits with code 2)
++`pyjev` is a thin convenience layer over TypeSafe's official `typesafe-sdk`. TypeSafe owns HTTP transport, retries, API semantics, and SDK models; pyjev adds reusable named decisions, credential ergonomics, output safety, and a small CLI.
+
+ ## Install
+
+ ```bash
+ pip install -e .
+-# or
+-uv pip install -e .
++# development
++pip install -e '.[dev]'
+ ```
+
+-For a CLI-only install from a future PyPI release:
+-
+-```bash
+-uv tool install pyjev
+-```
++For a published release, install the package from PyPI or use `uv tool install pyjev`.
+
+ ## Authentication
+
+-Environment variables are preferred in CI:
++Credential lookup has this precedence:
++
++1. explicit Python `api_key=...`;
++2. `TYPESAFE_API_KEY`;
++3. the operating-system keyring.
++
++Use the environment variable in CI:
+
+ ```bash
+ export TYPESAFE_API_KEY='...'
+ ```
+
+-For local use, store the key in the operating-system keyring:
++For local use, the interactive keyring prompt is preferred:
+
+ ```bash
+ pyjev auth set
+ pyjev auth status
++pyjev auth delete
+ ```
+
+-If no usable keyring backend is available, use `TYPESAFE_API_KEY` instead.
++`pyjev auth set --api-key SECRET` is retained for automation, but may expose the secret in shell history. API keys must not be stored in `.pyjev.toml`.
+
+ ## CLI
+
+-Noul / yes-no probability:
++### Primitive decisions
++
++Noul evaluates a yes/no probability:
+
+ ```bash
+ pyjev ask "Does this customer request a refund?" \
+-  --state "I want my money back"
++  --state "Please return my money."
+ ```
+
+-Choice:
++Choice preserves the selected label, confidence, and full probability distribution:
+
+ ```bash
+ pyjev choice "Where should this ticket go?" \
+@@ -63,180 +59,172 @@ pyjev choice "Where should this ticket go?" \
+   --option sales="Purchasing questions"
+ ```
+
+-Machine-friendly output:
++Score accepts 2–10 ordered levels:
+
+ ```bash
+-cat ticket.txt | pyjev choice "Where should this ticket go?" \
+-  --option billing \
+-  --option engineering \
+-  --option sales \
+-  --json
++pyjev score "How urgent is this?" \
++  --state "Production is down" \
++  --level "Can wait" \
++  --level "Normal" \
++  --level "Urgent" \
++  --level "Critical"
+ ```
+
+-Only print the selected value:
++State can come from `--state`, `--state-file`, or stdin. Add `--state-json` to decode it as JSON. Use `--json` for structured output or `--value` for only the selected value. These options cannot be combined.
+
+-```bash
+-TEAM=$(cat ticket.txt | pyjev choice "Route this ticket" \
+-  --option billing --option engineering --option sales --value)
+-```
++### Confidence gates
+
+-Confidence gate (exit status `2` if confidence is below the threshold):
++Choice and Score support `--min-confidence`:
+
+ ```bash
+-pyjev choice "Route this ticket" \
+-  --state "Something odd happened" \
++if TEAM="$(cat ticket.txt | pyjev choice "Route this ticket" \
+   --option billing --option engineering --option sales \
+-  --min-confidence 0.85
++  --min-confidence 0.85 --value)"; then
++  route_to "$TEAM"
++else
++  case "$?" in
++    3) human_review ;;
++    *) echo "pyjev failed" >&2; exit 1 ;;
++  esac
++fi
+ ```
+
+-Score:
++The gate is evaluated before successful output. A failed `--value` gate emits an empty stdout and a concise stderr message. With `--json`, a failed gate emits an explicit envelope containing `gate.passed`, `minimum_confidence`, `confidence`, and the full `result`.
+
+-```bash
+-pyjev score "How urgent is this?" \
+-  --state "Production is down for all customers" \
+-  --level "Can wait" \
+-  --level "Normal" \
+-  --level "Urgent" \
+-  --level "Critical"
+-```
++Noul has a probability of true rather than a Choice/Score confidence, so `--min-confidence` is not supported for Noul decisions.
+
+-Structured state can be JSON-decoded:
++### Exit codes
+
+-```bash
+-pyjev ask "Is this order high value?" \
+-  --state '{"total": 5000, "currency": "EUR"}' \
+-  --state-json
+-```
++| Exit | Meaning                                                                            |
++| ---: | ---------------------------------------------------------------------------------- |
++|    0 | Successful result and any confidence gate passed                                   |
++|    1 | Runtime failure: credentials, keyring, TypeSafe API, network, or configuration I/O |
++|    2 | CLI usage or local argument validation error                                       |
++|    3 | Valid Choice/Score result obtained, but confidence gate failed                     |
++
++Expected TypeSafe failures are concise and do not print tracebacks by default.
++
++## Reusable named decisions
++
++Create `.pyjev.toml` in a project:
++
++```toml
++[decision.ticket-route]
++type = "choice"
++question = "Which team should handle this support request?"
++model = "jev-latest"
+
+-Mixed questions in one request:
+-
+-```json
+-{
+-  "state": "I was charged twice and I am furious.",
+-  "questions": {
+-    "billing": {
+-      "type": "noul",
+-      "instructions": "Is this about billing?"
+-    },
+-    "tone": {
+-      "type": "choice",
+-      "instructions": "What is the tone?",
+-      "criteria": {
+-        "calm": null,
+-        "angry": null
+-      }
+-    }
+-  }
+-}
++[decision.ticket-route.options]
++billing = "Billing, invoice, payment, or refund issue"
++engineering = "Technical problem or product bug"
++sales = "Purchasing, pricing, or procurement question"
++other = "None of the above"
++
++[decision.urgency]
++type = "score"
++question = "How urgent is this?"
++levels = ["can wait", "normal", "urgent", "critical"]
++
++[decision.refund-request]
++type = "noul"
++question = "Does the customer request a refund?"
++true = "The customer wants money returned."
++false = "The customer does not request money returned."
+ ```
+
++Named decisions are read-only declarations. They support Noul, Choice, Score, and an optional per-decision model. Unknown fields and invalid cardinalities are rejected before any API request.
++
++Configuration precedence is:
++
++1. explicit Python `config=` or CLI `--config PATH`;
++2. `PYJEV_CONFIG`;
++3. the nearest `.pyjev.toml` in the current directory or a parent directory.
++
++Use the management commands to inspect declarations:
++
+ ```bash
+-pyjev run request.json
+-# or
+-cat request.json | pyjev run -
++pyjev decision list
++pyjev decision list --json
++pyjev decision show ticket-route --json
++pyjev decision validate
+ ```
+
+-List models available to the account:
++Run a named decision from the shell:
+
+ ```bash
+-pyjev models
++echo "Stripe webhooks keep failing" |
++  pyjev decide ticket-route --min-confidence 0.85 --json
+ ```
+
+-## Python
++The command supports the same state, model, config, output, and confidence options as primitive Choice/Score commands.
++
++## Python API
+
+ ```python
+ from pyjev import Jev
+
+ with Jev() as jev:
+-    result = jev.choice(
+-        "Which team should handle this?",
+-        state="Stripe checkout crashes.",
+-        choices={
+-            "billing": "Payments and refunds",
+-            "engineering": "Technical failures",
+-            "sales": "Purchasing questions",
+-        },
+-    )
+-
+-print(result.value)
+-print(result.confidence)
+-print(result.probabilities)
+-```
+-
+-Noul:
+-
+-```python
+-with Jev() as jev:
+-    result = jev.ask(
+-        "Does this customer request a refund?",
+-        state="Please return my money.",
++    result = jev.decide(
++        "ticket-route",
++        state="Stripe webhooks keep failing",
+     )
+
+-print(result.value)  # 0..1 probability of yes/true
++if result.confidence >= 0.85:
++    route(result.value)
+ ```
+
+-Score:
++A short-lived top-level convenience function is also available:
+
+ ```python
+-with Jev() as jev:
+-    result = jev.score(
+-        "How urgent is this?",
+-        state="Production is down.",
+-        levels=["Can wait", "Normal", "Urgent", "Critical"],
+-    )
++from pyjev import decide
+
+-print(result.value)       # expected score, potentially fractional
+-print(result.confidence)
++result = decide(
++    "ticket-route",
++    "Stripe checkout fails",
++    config="ops/.pyjev.toml",
++    model="jev-latest",  # explicit override wins over the TOML model
++)
+ ```
+
+-For several independent questions, use one API request:
++Direct primitive methods remain available:
+
+ ```python
+-from typesafe_sdk import Choice, Noul
+ from pyjev import Jev
+
+ with Jev() as jev:
+-    response = jev.run(
+-        state="I was charged twice and I am furious.",
+-        questions={
+-            "billing": Noul(instructions="Is this about billing?"),
+-            "tone": Choice(
+-                instructions="What is the tone?",
+-                criteria={"calm": None, "angry": None},
+-            ),
++    choice = jev.choice(
++        "Which team should handle this?",
++        state="Stripe checkout crashes.",
++        choices={
++            "billing": "Payments and refunds",
++            "engineering": "Technical failures",
++            "sales": "Purchasing questions",
+         },
+     )
++    score = jev.score(
++        "How urgent is this?",
++        state="Production is down.",
++        levels=["Can wait", "Normal", "Urgent", "Critical"],
++    )
+ ```
+
+-## Dynamic versioning
+-
+-There is no hard-coded package version in `pyproject.toml`.
+-
+-`setuptools-scm` derives versions from Git tags. Use tags such as:
+-
+-```bash
+-git tag v0.1.0
+-python -m build
+-```
+-
+-A normal tagged checkout builds as `0.1.0`. Commits after a tag receive an SCM-derived development version. The source snapshot also supports extracting from a directory named `pyjev-X.Y.Z`; otherwise a non-Git snapshot falls back to `0.0.0` so it remains buildable.
++`ChoiceResult` and `ScoreResult` preserve `value`, `confidence`, all probabilities, model, usage, raw answer data, and `request_id`. `NoulResult.value` is the raw probability of true and is not converted to a boolean.
+
+-At runtime:
++For several heterogeneous questions, use `jev.run(...)` to send one mixed request through the SDK.
+
+-```python
+-import pyjev
+-print(pyjev.__version__)
+-```
++## Versioning and development
+
+-## Development
++Versions are derived from Git tags with `setuptools-scm`; a tagged `v0.1.0` checkout builds as `0.1.0`.
+
+ ```bash
+-pip install -e '.[dev]'
++python -m compileall pyjev
+ pytest
+ ruff check .
++python -m build
++twine check dist/*
+ ```
+
+-No live API key is required for the unit tests.
++No live API key is required for the unit tests. CI tests Python 3.10–3.14, builds wheel and sdist artifacts, checks package metadata, and smoke-tests an installed wheel.
+
+ ## License
+
+diff --git a/pyjev/__init__.py b/pyjev/__init__.py
+index 977b6ee..5fc66cf 100644
+--- a/pyjev/__init__.py
++++ b/pyjev/__init__.py
+@@ -1,22 +1,42 @@
+ """pyjev public API."""
+
+-from importlib.metadata import PackageNotFoundError, version
++from __future__ import annotations
++
++from importlib.metadata import PackageNotFoundError
++from importlib.metadata import version as package_version
++from pathlib import Path
++from typing import Any
+
+ from .client import Jev
+ from .results import ChoiceResult, NoulResult, ScoreResult
+
+ try:
+-    __version__ = version("pyjev")
+-except PackageNotFoundError:  # source checkout before installation
++    from ._version import __version__
++except ImportError:  # source checkout without generated setuptools-scm output
+     try:
+-        from ._version import __version__  # type: ignore[import-not-found]
+-    except ImportError:
++        __version__ = package_version("pyjev")
++    except PackageNotFoundError:
+         __version__ = "0.0.0"
+
++
++def decide(
++    name: str,
++    state: Any,
++    *,
++    config: str | Path | None = None,
++    model: str | None = None,
++    api_key: str | None = None,
++) -> NoulResult | ChoiceResult | ScoreResult:
++    """Evaluate a named decision using a short-lived convenience client."""
++    with Jev(api_key=api_key, model=model) as jev:
++        return jev.decide(name, state=state, config=config, model=model)
++
++
+ __all__ = [
+     "ChoiceResult",
+     "Jev",
+     "NoulResult",
+     "ScoreResult",
+     "__version__",
++    "decide",
+ ]
+diff --git a/pyjev/cli.py b/pyjev/cli.py
+index c9ead3b..0ec11a8 100644
+--- a/pyjev/cli.py
++++ b/pyjev/cli.py
+@@ -4,22 +4,48 @@ from __future__ import annotations
+
+ import json
+ import sys
++from collections.abc import Callable
+ from pathlib import Path
+-from typing import Any
++from typing import Any, TypeVar
+
+ import typer
++from typesafe_sdk import (
++    TypeSafeAPIConnectionError,
++    TypeSafeAPIError,
++    TypeSafeAPITimeoutError,
++    TypeSafeAuthenticationError,
++    TypeSafeError,
++)
+
+ from . import __version__
+ from .client import Jev
+ from .credentials import CredentialError, credential_source, delete_api_key, set_api_key
++from .decisions import (
++    DecisionConfigError,
++    NoulDecision,
++    decision_to_dict,
++    find_config,
++    load_decision,
++    load_decisions,
++)
+ from .results import ChoiceResult, NoulResult, ScoreResult
+
++EXIT_OK = 0
++EXIT_RUNTIME_ERROR = 1
++EXIT_USAGE = 2
++EXIT_CONFIDENCE = 3
++
++T = TypeVar("T")
++Result = NoulResult | ChoiceResult | ScoreResult
++
+ app = typer.Typer(
+     no_args_is_help=True,
+     help="Reusable, confidence-aware Jev decisions from the shell.",
+ )
+ auth_app = typer.Typer(no_args_is_help=True, help="Manage the TypeSafe API key.")
++decision_app = typer.Typer(no_args_is_help=True, help="Inspect read-only named decisions.")
+ app.add_typer(auth_app, name="auth")
++app.add_typer(decision_app, name="decision")
+
+
+ def _version_callback(value: bool) -> None:
+@@ -69,18 +95,22 @@ def _state_value(state: str | None, state_file: Path | None, state_json: bool) -
+         raise typer.BadParameter(f"State is not valid JSON: {exc}") from exc
+
+
++def _validate_output_options(*, json_output: bool, value_only: bool) -> None:
++    if json_output and value_only:
++        raise typer.BadParameter("Use either --json or --value, not both.")
++
++
++def _validate_min_confidence(value: float | None) -> None:
++    if value is not None and not 0 <= value <= 1:
++        raise typer.BadParameter("--min-confidence must be between 0 and 1.")
++
++
+ def _print_json(data: Any) -> None:
+     typer.echo(json.dumps(data, indent=2, sort_keys=True, ensure_ascii=False))
+
+
+-def _emit_result(
+-    result: NoulResult | ChoiceResult | ScoreResult,
+-    *,
+-    json_output: bool,
+-    value_only: bool,
+-) -> None:
+-    if json_output and value_only:
+-        raise typer.BadParameter("Use either --json or --value, not both.")
++def _emit_result(result: Result, *, json_output: bool, value_only: bool) -> None:
++    _validate_output_options(json_output=json_output, value_only=value_only)
+     if json_output:
+         _print_json(result.to_dict())
+         return
+@@ -96,13 +126,48 @@ def _emit_result(
+         typer.echo(f"score={result.value:.6f} confidence={result.confidence:.6f}")
+
+
+-def _confidence_gate(confidence: float, minimum: float | None) -> None:
+-    if minimum is None:
++def _gate_failed(confidence: float, minimum: float | None) -> bool:
++    return minimum is not None and confidence < minimum
++
++
++def _emit_gate_failure(
++    result: ChoiceResult | ScoreResult,
++    *,
++    minimum: float,
++    json_output: bool,
++) -> None:
++    if json_output:
++        _print_json(
++            {
++                "gate": {
++                    "passed": False,
++                    "minimum_confidence": minimum,
++                    "confidence": result.confidence,
++                },
++                "result": result.to_dict(),
++            }
++        )
++    else:
++        typer.echo(
++            f"Confidence {result.confidence:.2f} is below required {minimum:.2f}.",
++            err=True,
++        )
++    raise typer.Exit(code=EXIT_CONFIDENCE)
++
++
++def _emit_gated_result(
++    result: Result,
++    *,
++    json_output: bool,
++    value_only: bool,
++    minimum: float | None,
++) -> None:
++    if isinstance(result, NoulResult):
++        _emit_result(result, json_output=json_output, value_only=value_only)
+         return
+-    if not 0 <= minimum <= 1:
+-        raise typer.BadParameter("--min-confidence must be between 0 and 1.")
+-    if confidence < minimum:
+-        raise typer.Exit(code=2)
++    if minimum is not None and _gate_failed(result.confidence, minimum):
++        _emit_gate_failure(result, minimum=minimum, json_output=json_output)
++    _emit_result(result, json_output=json_output, value_only=value_only)
+
+
+ def _parse_options(options: list[str]) -> dict[str, str | None]:
+@@ -117,51 +182,40 @@ def _parse_options(options: list[str]) -> dict[str, str | None]:
+         parsed[label] = description if separator else None
+     if len(parsed) < 2:
+         raise typer.BadParameter("Provide at least two --option values.")
++    if len(parsed) > 255:
++        raise typer.BadParameter("Provide no more than 255 --option values.")
+     return parsed
+
+
+-def _client(model: str | None) -> Jev:
+-    return Jev(model=model)
+-
++def _parse_decision_error(exc: DecisionConfigError) -> typer.BadParameter:
++    return typer.BadParameter(str(exc))
+
+-@auth_app.command("set")
+-def auth_set(
+-    api_key: str = typer.Option(
+-        ...,
+-        "--api-key",
+-        prompt="TypeSafe API key",
+-        hide_input=True,
+-        help="API key to store in the OS keyring.",
+-    ),
+-) -> None:
+-    try:
+-        set_api_key(api_key)
+-    except CredentialError as exc:
+-        typer.echo(str(exc), err=True)
+-        raise typer.Exit(code=1) from exc
+-    typer.echo("Stored TypeSafe API key in the OS keyring.")
+-
+-
+-@auth_app.command("status")
+-def auth_status() -> None:
+-    source = credential_source()
+-    if source == "environment":
+-        typer.echo("API key available from TYPESAFE_API_KEY.")
+-    elif source == "keyring":
+-        typer.echo("API key stored in the OS keyring.")
+-    else:
+-        typer.echo("No API key found.")
+-        raise typer.Exit(code=1)
+
+-
+-@auth_app.command("delete")
+-def auth_delete() -> None:
++def _run_api(action: Callable[[Jev], T], *, model: str | None = None) -> T:
+     try:
+-        removed = delete_api_key()
++        with Jev(model=model) as jev:
++            return action(jev)
++    except TypeSafeAuthenticationError as exc:
++        typer.echo(
++            "Error: TypeSafe authentication failed.\nSet TYPESAFE_API_KEY or run `pyjev auth set`.",
++            err=True,
++        )
++        raise typer.Exit(code=EXIT_RUNTIME_ERROR) from exc
++    except (TypeSafeAPITimeoutError, TypeSafeAPIConnectionError) as exc:
++        typer.echo(f"Error: Could not reach TypeSafe: {exc}", err=True)
++        raise typer.Exit(code=EXIT_RUNTIME_ERROR) from exc
++    except TypeSafeAPIError as exc:
++        typer.echo(f"Error: TypeSafe API request failed: {exc}", err=True)
++        raise typer.Exit(code=EXIT_RUNTIME_ERROR) from exc
++    except TypeSafeError as exc:
++        message = str(exc)
++        if "No API key" in message:
++            message = "TypeSafe authentication failed. Set TYPESAFE_API_KEY or run `pyjev auth set`."
++        typer.echo(f"Error: {message}", err=True)
++        raise typer.Exit(code=EXIT_RUNTIME_ERROR) from exc
+     except CredentialError as exc:
+-        typer.echo(str(exc), err=True)
+-        raise typer.Exit(code=1) from exc
+-    typer.echo("Deleted stored API key." if removed else "No stored API key found.")
++        typer.echo(f"Error: {exc}", err=True)
++        raise typer.Exit(code=EXIT_RUNTIME_ERROR) from exc
+
+
+ def _run_noul(
+@@ -175,9 +229,12 @@ def _run_noul(
+     json_output: bool,
+     value_only: bool,
+ ) -> None:
++    _validate_output_options(json_output=json_output, value_only=value_only)
+     value = _state_value(state, state_file, state_json)
+-    with _client(model) as jev:
+-        result = jev.noul(question, state=value, true=true, false=false)
++    result = _run_api(
++        lambda jev: jev.noul(question, state=value, true=true, false=false),
++        model=model,
++    )
+     _emit_result(result, json_output=json_output, value_only=value_only)
+
+
+@@ -224,16 +281,21 @@ def choice(
+     state_file: Path | None = typer.Option(None, "--state-file", help="Read state from a file."),
+     state_json: bool = typer.Option(False, "--state-json", help="Decode the state as JSON."),
+     model: str | None = typer.Option(None, "--model", help="Override the TypeSafe model."),
+-    min_confidence: float | None = typer.Option(None, "--min-confidence", help="Exit 2 below this confidence."),
++    min_confidence: float | None = typer.Option(None, "--min-confidence", help="Exit 3 below this confidence."),
+     json_output: bool = typer.Option(False, "--json", help="Emit JSON."),
+     value_only: bool = typer.Option(False, "--value", help="Emit only the selected label."),
+ ) -> None:
++    _validate_output_options(json_output=json_output, value_only=value_only)
++    _validate_min_confidence(min_confidence)
+     value = _state_value(state, state_file, state_json)
+     choices = _parse_options(option)
+-    with _client(model) as jev:
+-        result = jev.choice(question, state=value, choices=choices)
+-    _emit_result(result, json_output=json_output, value_only=value_only)
+-    _confidence_gate(result.confidence, min_confidence)
++    result = _run_api(lambda jev: jev.choice(question, state=value, choices=choices), model=model)
++    _emit_gated_result(
++        result,
++        json_output=json_output,
++        value_only=value_only,
++        minimum=min_confidence,
++    )
+
+
+ @app.command("score")
+@@ -249,17 +311,148 @@ def score(
+     state_file: Path | None = typer.Option(None, "--state-file", help="Read state from a file."),
+     state_json: bool = typer.Option(False, "--state-json", help="Decode the state as JSON."),
+     model: str | None = typer.Option(None, "--model", help="Override the TypeSafe model."),
+-    min_confidence: float | None = typer.Option(None, "--min-confidence", help="Exit 2 below this confidence."),
++    min_confidence: float | None = typer.Option(None, "--min-confidence", help="Exit 3 below this confidence."),
+     json_output: bool = typer.Option(False, "--json", help="Emit JSON."),
+     value_only: bool = typer.Option(False, "--value", help="Emit only the expected score."),
+ ) -> None:
+-    if not level:
+-        raise typer.BadParameter("Provide at least one --level.")
++    _validate_output_options(json_output=json_output, value_only=value_only)
++    _validate_min_confidence(min_confidence)
++    if not 2 <= len(level) <= 10:
++        raise typer.BadParameter("Provide between 2 and 10 --level values.")
+     value = _state_value(state, state_file, state_json)
+-    with _client(model) as jev:
+-        result = jev.score(question, state=value, levels=level)
+-    _emit_result(result, json_output=json_output, value_only=value_only)
+-    _confidence_gate(result.confidence, min_confidence)
++    result = _run_api(lambda jev: jev.score(question, state=value, levels=level), model=model)
++    _emit_gated_result(
++        result,
++        json_output=json_output,
++        value_only=value_only,
++        minimum=min_confidence,
++    )
++
++
++def _named_decision_result(
++    name: str,
++    *,
++    state: Any,
++    config: str | None,
++    model: str | None,
++) -> Result:
++    return _run_api(lambda jev: jev.decide(name, state=state, config=config, model=model), model=model)
++
++
++@app.command("decide")
++def decide(
++    name: str = typer.Argument(..., help="Name declared in .pyjev.toml."),
++    state: str | None = typer.Option(None, "--state", "-s", help="State text."),
++    state_file: Path | None = typer.Option(None, "--state-file", help="Read state from a file."),
++    state_json: bool = typer.Option(False, "--state-json", help="Decode the state as JSON."),
++    model: str | None = typer.Option(None, "--model", help="Override the decision's model."),
++    config: Path | None = typer.Option(None, "--config", help="Path to a .pyjev.toml file."),
++    min_confidence: float | None = typer.Option(None, "--min-confidence", help="Exit 3 below this confidence."),
++    json_output: bool = typer.Option(False, "--json", help="Emit JSON."),
++    value_only: bool = typer.Option(False, "--value", help="Emit only the selected value."),
++) -> None:
++    _validate_output_options(json_output=json_output, value_only=value_only)
++    _validate_min_confidence(min_confidence)
++    try:
++        declaration = load_decision(name, config)
++    except DecisionConfigError as exc:
++        raise _parse_decision_error(exc) from exc
++    if isinstance(declaration, NoulDecision) and min_confidence is not None:
++        raise typer.BadParameter("--min-confidence is only valid for named Choice and Score decisions.")
++    value = _state_value(state, state_file, state_json)
++    result = _named_decision_result(name, state=value, config=str(config) if config else None, model=model)
++    _emit_gated_result(
++        result,
++        json_output=json_output,
++        value_only=value_only,
++        minimum=min_confidence,
++    )
++
++
++@auth_app.command("set")
++def auth_set(
++    api_key: str = typer.Option(
++        ...,
++        "--api-key",
++        prompt="TypeSafe API key",
++        hide_input=True,
++        help="API key to store in the OS keyring.",
++    ),
++) -> None:
++    try:
++        set_api_key(api_key)
++    except CredentialError as exc:
++        typer.echo(str(exc), err=True)
++        raise typer.Exit(code=EXIT_RUNTIME_ERROR) from exc
++    typer.echo("Stored TypeSafe API key in the OS keyring.")
++
++
++@auth_app.command("status")
++def auth_status() -> None:
++    source = credential_source()
++    if source == "environment":
++        typer.echo("API key available from TYPESAFE_API_KEY.")
++    elif source == "keyring":
++        typer.echo("API key stored in the OS keyring.")
++    else:
++        typer.echo("No API key found.")
++        raise typer.Exit(code=EXIT_RUNTIME_ERROR)
++
++
++@auth_app.command("delete")
++def auth_delete() -> None:
++    try:
++        removed = delete_api_key()
++    except CredentialError as exc:
++        typer.echo(str(exc), err=True)
++        raise typer.Exit(code=EXIT_RUNTIME_ERROR) from exc
++    typer.echo("Deleted stored API key." if removed else "No stored API key found.")
++
++
++@decision_app.command("list")
++def decision_list(
++    config: Path | None = typer.Option(None, "--config", help="Path to a .pyjev.toml file."),
++    json_output: bool = typer.Option(False, "--json", help="Emit JSON."),
++) -> None:
++    try:
++        decisions = load_decisions(config)
++    except DecisionConfigError as exc:
++        raise _parse_decision_error(exc) from exc
++    if json_output:
++        _print_json([decision_to_dict(decision) for decision in decisions.values()])
++        return
++    for decision in decisions.values():
++        typer.echo(f"{decision.name}\t{type(decision).__name__.removesuffix('Decision').lower()}")
++
++
++@decision_app.command("show")
++def decision_show(
++    name: str = typer.Argument(..., help="Decision name."),
++    config: Path | None = typer.Option(None, "--config", help="Path to a .pyjev.toml file."),
++    json_output: bool = typer.Option(False, "--json", help="Emit JSON."),
++) -> None:
++    try:
++        decision = load_decision(name, config)
++    except DecisionConfigError as exc:
++        raise _parse_decision_error(exc) from exc
++    if json_output:
++        _print_json(decision_to_dict(decision))
++    else:
++        typer.echo(f"name={decision.name}")
++        typer.echo(f"type={type(decision).__name__.removesuffix('Decision').lower()}")
++        typer.echo(f"question={decision.question}")
++
++
++@decision_app.command("validate")
++def decision_validate(
++    config: Path | None = typer.Option(None, "--config", help="Path to a .pyjev.toml file."),
++) -> None:
++    try:
++        path = find_config(config)
++        decisions = load_decisions(config)
++    except DecisionConfigError as exc:
++        raise _parse_decision_error(exc) from exc
++    typer.echo(f"Valid {path}: {len(decisions)} decisions")
+
+
+ @app.command("run")
+@@ -278,8 +471,10 @@ def run(
+     if not isinstance(questions, dict) or not questions:
+         raise typer.BadParameter("'questions' must be a non-empty object.")
+
+-    with _client(payload.get("model")) as jev:
+-        result = jev.run(state=payload["state"], questions=questions)
++    result = _run_api(
++        lambda jev: jev.run(state=payload["state"], questions=questions),
++        model=payload.get("model"),
++    )
+     _print_json(result)
+
+
+@@ -287,8 +482,7 @@ def run(
+ def models(
+     json_output: bool = typer.Option(False, "--json", help="Emit JSON."),
+ ) -> None:
+-    with _client(None) as jev:
+-        available = jev.models()
++    available = _run_api(lambda jev: jev.models())
+     if json_output:
+         _print_json(available)
+         return
+diff --git a/pyjev/client.py b/pyjev/client.py
+index 2b1f07a..0fc5eee 100644
+--- a/pyjev/client.py
++++ b/pyjev/client.py
+@@ -3,6 +3,7 @@
+ from __future__ import annotations
+
+ from collections.abc import Mapping, Sequence
++from pathlib import Path
+ from types import TracebackType
+ from typing import Any
+
+@@ -12,6 +13,39 @@ from .credentials import get_api_key
+ from .results import ChoiceResult, NoulResult, ScoreResult
+
+
++def _request_id(response: Any) -> str | None:
++    """Read the SDK's public request-id property when a response has one."""
++    try:
++        value = response.request_id
++    except Exception:  # SDK response fakes and non-HTTP responses may omit metadata.
++        return None
++    return value if isinstance(value, str) else None
++
++
++def _validate_choice_criteria(choices: Mapping[str, Any | None] | Sequence[str]) -> dict[str, Any | None]:
++    if isinstance(choices, Mapping):
++        criteria = dict(choices)
++    else:
++        labels = list(choices)
++        if len(labels) != len(set(labels)):
++            raise ValueError("choice sequence contains duplicate labels")
++        criteria = {name: None for name in labels}
++
++    if not 2 <= len(criteria) <= 255:
++        raise ValueError("choice requires between 2 and 255 options")
++    for label in criteria:
++        if not isinstance(label, str) or not label.strip():
++            raise ValueError("choice labels must be nonempty strings")
++    return criteria
++
++
++def _validate_score_levels(levels: Sequence[Any]) -> list[Any]:
++    values = list(levels)
++    if not 2 <= len(values) <= 10:
++        raise ValueError("score requires between 2 and 10 levels")
++    return values
++
++
+ class Jev:
+     """Convenience client for common Jev decisions.
+
+@@ -27,11 +61,17 @@ class Jev:
+         timeout: float | None = None,
+         client: TypeSafeClient | None = None,
+     ) -> None:
++        if client is not None and any(value is not None for value in (api_key, model, timeout)):
++            raise ValueError("api_key, model, and timeout cannot be used with an injected client")
+         self._owns_client = client is None
+-        self._client = client or TypeSafeClient(
+-            api_key=get_api_key(api_key),
+-            model=model,
+-            timeout=timeout,
++        self._client = (
++            client
++            if client is not None
++            else TypeSafeClient(
++                api_key=get_api_key(api_key),
++                model=model,
++                timeout=timeout,
++            )
+         )
+
+     @property
+@@ -74,6 +114,7 @@ class Jev:
+             model=response.model,
+             usage=response.usage.model_dump(mode="json"),
+             raw=answer.model_dump(mode="json"),
++            request_id=_request_id(response),
+         )
+
+     def choice(
+@@ -84,13 +125,7 @@ class Jev:
+         choices: Mapping[str, Any | None] | Sequence[str],
+         model: str | None = None,
+     ) -> ChoiceResult:
+-        if isinstance(choices, Mapping):
+-            criteria = dict(choices)
+-        else:
+-            criteria = {name: None for name in choices}
+-        if len(criteria) < 2:
+-            raise ValueError("choice requires at least two options")
+-
++        criteria = _validate_choice_criteria(choices)
+         response = self._client.system_one(
+             state=state,
+             questions={"answer": Choice(instructions=question, criteria=criteria)},
+@@ -104,6 +139,7 @@ class Jev:
+             model=response.model,
+             usage=response.usage.model_dump(mode="json"),
+             raw=answer.model_dump(mode="json"),
++            request_id=_request_id(response),
+         )
+
+     def score(
+@@ -114,12 +150,10 @@ class Jev:
+         levels: Sequence[Any],
+         model: str | None = None,
+     ) -> ScoreResult:
+-        if not levels:
+-            raise ValueError("score requires at least one level")
+-
++        values = _validate_score_levels(levels)
+         response = self._client.system_one(
+             state=state,
+-            questions={"answer": Score(instructions=question, criteria=list(levels))},
++            questions={"answer": Score(instructions=question, criteria=values)},
+             model=model,
+         )
+         answer = response.scores["answer"]
+@@ -131,8 +165,36 @@ class Jev:
+             model=response.model,
+             usage=response.usage.model_dump(mode="json"),
+             raw=answer.model_dump(mode="json"),
++            request_id=_request_id(response),
+         )
+
++    def decide(
++        self,
++        name: str,
++        *,
++        state: Any,
++        config: str | Path | None = None,
++        model: str | None = None,
++    ) -> NoulResult | ChoiceResult | ScoreResult:
++        """Evaluate a validated named decision from a TOML configuration."""
++        from .decisions import ChoiceDecision, NoulDecision, ScoreDecision, load_decision
++
++        decision = load_decision(name, config)
++        effective_model = model if model is not None else decision.model
++        if isinstance(decision, NoulDecision):
++            return self.noul(
++                decision.question,
++                state=state,
++                true=decision.true,
++                false=decision.false,
++                model=effective_model,
++            )
++        if isinstance(decision, ChoiceDecision):
++            return self.choice(decision.question, state=state, choices=decision.options, model=effective_model)
++        if isinstance(decision, ScoreDecision):
++            return self.score(decision.question, state=state, levels=decision.levels, model=effective_model)
++        raise TypeError(f"Unsupported decision type: {type(decision).__name__}")
++
+     def run(
+         self,
+         *,
+diff --git a/pyjev/decisions.py b/pyjev/decisions.py
+new file mode 100644
+index 0000000..c8798f8
+--- /dev/null
++++ b/pyjev/decisions.py
+@@ -0,0 +1,234 @@
++"""Read-only named decision declarations stored in ``.pyjev.toml``."""
++
++from __future__ import annotations
++
++import json
++import os
++from dataclasses import dataclass
++from pathlib import Path
++from typing import Any
++
++try:  # Python 3.11+
++    import tomllib
++except ModuleNotFoundError:  # pragma: no cover - exercised on Python 3.10
++    import tomli as tomllib  # type: ignore[no-redef]
++
++
++class DecisionConfigError(ValueError):
++    """A named-decision configuration is missing or invalid."""
++
++
++class DecisionConfigNotFound(DecisionConfigError):
++    """No decision configuration could be found."""
++
++
++@dataclass(frozen=True, slots=True)
++class NoulDecision:
++    name: str
++    question: str
++    true: Any | None = None
++    false: Any | None = None
++    model: str | None = None
++
++
++@dataclass(frozen=True, slots=True)
++class ChoiceDecision:
++    name: str
++    question: str
++    options: dict[str, Any | None]
++    model: str | None = None
++
++
++@dataclass(frozen=True, slots=True)
++class ScoreDecision:
++    name: str
++    question: str
++    levels: tuple[Any, ...]
++    model: str | None = None
++
++
++Decision = NoulDecision | ChoiceDecision | ScoreDecision
++
++
++def find_config(
++    config: str | Path | None = None,
++    *,
++    start: str | Path | None = None,
++) -> Path:
++    """Resolve an explicit, environment, or nearest-parent config path."""
++    if config is not None:
++        path = Path(config).expanduser()
++        if not path.is_file():
++            raise DecisionConfigNotFound(f"Decision config not found: {path}")
++        return path.resolve()
++
++    env_config = os.getenv("PYJEV_CONFIG")
++    if env_config:
++        path = Path(env_config).expanduser()
++        if not path.is_file():
++            raise DecisionConfigNotFound(f"PYJEV_CONFIG points to missing file: {path}")
++        return path.resolve()
++
++    location = Path(start).expanduser() if start is not None else Path.cwd()
++    if location.is_file():
++        location = location.parent
++    location = location.resolve()
++    for directory in (location, *location.parents):
++        candidate = directory / ".pyjev.toml"
++        if candidate.is_file():
++            return candidate
++    raise DecisionConfigNotFound(
++        f"Could not find .pyjev.toml from {location}; pass config=... or use the CLI --config PATH option."
++    )
++
++
++def _error(path: Path, name: str | None, field: str, message: str) -> DecisionConfigError:
++    target = f"decision {name!r}" if name is not None else "configuration"
++    return DecisionConfigError(f"{path}: {target}: {field}: {message}")
++
++
++def _json_compatible(value: Any) -> bool:
++    try:
++        json.dumps(value)
++    except (TypeError, ValueError):
++        return False
++    return True
++
++
++def _require_table(value: Any, path: Path, name: str | None, field: str) -> dict[str, Any]:
++    if not isinstance(value, dict):
++        raise _error(path, name, field, "expected a TOML table")
++    return value
++
++
++def _question(table: dict[str, Any], path: Path, name: str) -> str:
++    value = table.get("question")
++    if not isinstance(value, str) or not value.strip():
++        raise _error(path, name, "question", "must be a nonempty string")
++    return value
++
++
++def _model(table: dict[str, Any], path: Path, name: str) -> str | None:
++    value = table.get("model")
++    if value is None:
++        return None
++    if not isinstance(value, str) or not value.strip():
++        raise _error(path, name, "model", "must be a nonempty string")
++    return value
++
++
++def _check_fields(table: dict[str, Any], allowed: set[str], path: Path, name: str) -> None:
++    unknown = sorted(set(table) - allowed)
++    if unknown:
++        raise _error(path, name, unknown[0], "unknown field")
++
++
++def _parse_decision(name: str, raw: Any, path: Path) -> Decision:
++    if not isinstance(name, str) or not name.strip():
++        raise _error(path, name, "name", "must be a nonempty string")
++    table = _require_table(raw, path, name, "decision")
++    kind = table.get("type")
++    if kind not in {"noul", "choice", "score"}:
++        raise _error(path, name, "type", "must be exactly noul, choice, or score")
++    question = _question(table, path, name)
++    model = _model(table, path, name)
++
++    if kind == "noul":
++        _check_fields(table, {"type", "question", "true", "false", "model"}, path, name)
++        for field in ("true", "false"):
++            if field in table and not _json_compatible(table[field]):
++                raise _error(path, name, field, "must be JSON-compatible")
++        return NoulDecision(name=name, question=question, true=table.get("true"), false=table.get("false"), model=model)
++
++    if kind == "choice":
++        _check_fields(table, {"type", "question", "options", "model"}, path, name)
++        options = table.get("options")
++        if not isinstance(options, dict):
++            raise _error(path, name, "options", "must be a TOML table")
++        if not 2 <= len(options) <= 255:
++            raise _error(path, name, "options", "must contain between 2 and 255 options")
++        parsed_options: dict[str, Any | None] = {}
++        for label, description in options.items():
++            if not isinstance(label, str) or not label.strip():
++                raise _error(path, name, "options", "labels must be nonempty strings")
++            if label in parsed_options:
++                raise _error(path, name, "options", f"duplicate label {label!r}")
++            if not _json_compatible(description):
++                raise _error(path, name, f"options.{label}", "must be JSON-compatible")
++            parsed_options[label] = description
++        return ChoiceDecision(name=name, question=question, options=parsed_options, model=model)
++
++    _check_fields(table, {"type", "question", "levels", "model"}, path, name)
++    levels = table.get("levels")
++    if not isinstance(levels, list):
++        raise _error(path, name, "levels", "must be an array")
++    if not 2 <= len(levels) <= 10:
++        raise _error(path, name, "levels", "must contain between 2 and 10 levels")
++    if not all(_json_compatible(level) for level in levels):
++        raise _error(path, name, "levels", "must contain only JSON-compatible values")
++    return ScoreDecision(name=name, question=question, levels=tuple(levels), model=model)
++
++
++def load_decisions(config: str | Path | None = None) -> dict[str, Decision]:
++    """Load and strictly validate every named decision in a config file."""
++    path = find_config(config)
++    try:
++        with path.open("rb") as stream:
++            document = tomllib.load(stream)
++    except OSError as exc:
++        raise DecisionConfigError(f"Could not read decision config {path}: {exc}") from exc
++    except tomllib.TOMLDecodeError as exc:
++        raise DecisionConfigError(f"{path}: invalid TOML: {exc}") from exc
++
++    raw_decisions = document.get("decision")
++    if not isinstance(raw_decisions, dict):
++        raise DecisionConfigError(f"{path}: decision: expected a TOML table")
++    decisions: dict[str, Decision] = {}
++    for name, raw in raw_decisions.items():
++        if name in decisions:
++            raise _error(path, name, "name", "duplicate decision name")
++        decisions[name] = _parse_decision(name, raw, path)
++    return decisions
++
++
++def load_decision(name: str, config: str | Path | None = None) -> Decision:
++    """Load one named decision after validating the complete configuration."""
++    if not isinstance(name, str) or not name.strip():
++        raise DecisionConfigError("Decision name must be a nonempty string.")
++    decisions = load_decisions(config)
++    try:
++        return decisions[name]
++    except KeyError as exc:
++        path = find_config(config)
++        raise DecisionConfigError(f"{path}: decision {name!r}: not found") from exc
++
++
++def decision_to_dict(decision: Decision) -> dict[str, Any]:
++    """Return a JSON-serializable representation for CLI output."""
++    if isinstance(decision, NoulDecision):
++        result: dict[str, Any] = {
++            "name": decision.name,
++            "type": "noul",
++            "question": decision.question,
++        }
++        if decision.true is not None:
++            result["true"] = decision.true
++        if decision.false is not None:
++            result["false"] = decision.false
++    elif isinstance(decision, ChoiceDecision):
++        result = {
++            "name": decision.name,
++            "type": "choice",
++            "question": decision.question,
++            "options": decision.options,
++        }
++    else:
++        result = {
++            "name": decision.name,
++            "type": "score",
++            "question": decision.question,
++            "levels": list(decision.levels),
++        }
++    if decision.model is not None:
++        result["model"] = decision.model
++    return result
+diff --git a/pyjev/results.py b/pyjev/results.py
+index ab0c2ec..4cfd6dc 100644
+--- a/pyjev/results.py
++++ b/pyjev/results.py
+@@ -12,9 +12,10 @@ class NoulResult:
+     model: str
+     usage: dict[str, Any]
+     raw: dict[str, Any]
++    request_id: str | None = None
+
+     def to_dict(self) -> dict[str, Any]:
+-        return {**self.raw, "model": self.model, "usage": self.usage}
++        return {**self.raw, "model": self.model, "usage": self.usage, "request_id": self.request_id}
+
+
+ @dataclass(frozen=True, slots=True)
+@@ -25,9 +26,10 @@ class ChoiceResult:
+     model: str
+     usage: dict[str, Any]
+     raw: dict[str, Any]
++    request_id: str | None = None
+
+     def to_dict(self) -> dict[str, Any]:
+-        return {**self.raw, "model": self.model, "usage": self.usage}
++        return {**self.raw, "model": self.model, "usage": self.usage, "request_id": self.request_id}
+
+
+ @dataclass(frozen=True, slots=True)
+@@ -39,6 +41,7 @@ class ScoreResult:
+     model: str
+     usage: dict[str, Any]
+     raw: dict[str, Any]
++    request_id: str | None = None
+
+     def to_dict(self) -> dict[str, Any]:
+-        return {**self.raw, "model": self.model, "usage": self.usage}
++        return {**self.raw, "model": self.model, "usage": self.usage, "request_id": self.request_id}
+diff --git a/pyproject.toml b/pyproject.toml
+index 2f96fb0..e693181 100644
+--- a/pyproject.toml
++++ b/pyproject.toml
+@@ -28,12 +28,15 @@ dependencies = [
+   "typesafe-sdk>=0.7.0,<1",
+   "typer>=0.16,<1",
+   "keyring>=25,<26",
++  "tomli>=2; python_version < '3.11'",
+ ]
+
+ [project.optional-dependencies]
+ dev = [
+   "pytest>=9,<10",
+   "ruff>=0.16,<1",
++  "build>=1,<2",
++  "twine>=6,<7",
+ ]
+
+ [project.scripts]
+@@ -69,3 +72,6 @@ line-length = 120
+
+ [tool.ruff.lint]
+ select = ["E", "F", "I", "UP", "B"]
++
++[tool.ruff.lint.per-file-ignores]
++"pyjev/cli.py" = ["B008"]
+diff --git a/tests/test_client.py b/tests/test_client.py
+index ef41b80..b271136 100644
+--- a/tests/test_client.py
++++ b/tests/test_client.py
+@@ -2,6 +2,8 @@ from __future__ import annotations
+
+ from types import SimpleNamespace
+
++import pytest
++
+ from pyjev import Jev
+
+
+@@ -14,6 +16,7 @@ class Dumpable(SimpleNamespace):
+ class FakeResponse:
+     def __init__(self, kind: str):
+         self.model = "jev-test"
++        self.request_id = "request-123"
+         self.usage = Dumpable(input_tokens=10, output_tokens=2)
+         self.nouls = {}
+         self.choices = {}
+@@ -108,3 +111,62 @@ def test_run_keeps_mixed_request_shape():
+ def test_models():
+     jev = Jev(client=FakeClient())
+     assert jev.models()[0]["name"] == "jev-test"
++
++
++def test_request_id_is_preserved():
++    result = Jev(client=FakeClient()).ask("Question?", state="state")
++    assert result.request_id == "request-123"
++    assert result.to_dict()["request_id"] == "request-123"
++
++
++@pytest.mark.parametrize("choices", [[], ["one"], ["one", "one"]])
++def test_invalid_choice_sequence_makes_no_api_call(choices):
++    client = FakeClient()
++    with pytest.raises(ValueError):
++        Jev(client=client).choice("Route?", state="state", choices=choices)
++    assert client.calls == []
++
++
++def test_choice_rejects_256_options_without_api_call():
++    client = FakeClient()
++    with pytest.raises(ValueError, match="255"):
++        Jev(client=client).choice("Route?", state="state", choices=[str(i) for i in range(256)])
++    assert client.calls == []
++
++
++@pytest.mark.parametrize("levels", [[], ["one"], [str(i) for i in range(11)]])
++def test_invalid_score_levels_make_no_api_call(levels):
++    client = FakeClient()
++    with pytest.raises(ValueError, match="2 and 10"):
++        Jev(client=client).score("Score?", state="state", levels=levels)
++    assert client.calls == []
++
++
++def test_injected_client_rejects_constructor_options():
++    with pytest.raises(ValueError, match="injected client"):
++        Jev(client=FakeClient(), model="model")
++
++
++def test_named_decision_dispatch_uses_explicit_model_override(tmp_path):
++    config = tmp_path / ".pyjev.toml"
++    config.write_text(
++        "[decision.route]\ntype='choice'\nquestion='Route?'\nmodel='decision-model'\n"
++        "[decision.route.options]\nbilling='Billing'\nengineering='Technical'\n",
++        encoding="utf-8",
++    )
++    client = FakeClient()
++    result = Jev(client=client).decide("route", state="ticket", config=config, model="call-model")
++    assert result.value == "engineering"
++    assert client.calls[-1][2] == "call-model"
++
++
++def test_named_decision_uses_config_model_when_call_model_absent(tmp_path):
++    config = tmp_path / ".pyjev.toml"
++    config.write_text(
++        "[decision.route]\ntype='choice'\nquestion='Route?'\nmodel='decision-model'\n"
++        "[decision.route.options]\nbilling='Billing'\nengineering='Technical'\n",
++        encoding="utf-8",
++    )
++    client = FakeClient()
++    Jev(client=client).decide("route", state="ticket", config=config)
++    assert client.calls[-1][2] == "decision-model"
+diff --git a/tests/test_decisions.py b/tests/test_decisions.py
+new file mode 100644
+index 0000000..1a40710
+--- /dev/null
++++ b/tests/test_decisions.py
+@@ -0,0 +1,109 @@
++from __future__ import annotations
++
++from pathlib import Path
++
++import pytest
++
++from pyjev.decisions import (
++    ChoiceDecision,
++    DecisionConfigError,
++    NoulDecision,
++    ScoreDecision,
++    find_config,
++    load_decision,
++    load_decisions,
++)
++
++
++def write_config(tmp_path: Path, text: str) -> Path:
++    path = tmp_path / ".pyjev.toml"
++    path.write_text(text, encoding="utf-8")
++    return path
++
++
++def test_loads_all_decision_types_and_models(tmp_path: Path) -> None:
++    path = write_config(
++        tmp_path,
++        """
++[decision.route]
++type = "choice"
++question = "Where should this go?"
++model = "decision-model"
++[decision.route.options]
++billing = "Payments"
++engineering = "Technical"
++
++[decision.urgent]
++type = "score"
++question = "How urgent?"
++levels = ["normal", "urgent"]
++
++[decision.refund]
++type = "noul"
++question = "Does the customer want a refund?"
++true = "Money returned"
++false = "No refund"
++""",
++    )
++
++    decisions = load_decisions(path)
++    assert isinstance(decisions["route"], ChoiceDecision)
++    assert decisions["route"].options["billing"] == "Payments"
++    assert decisions["route"].model == "decision-model"
++    assert isinstance(decisions["urgent"], ScoreDecision)
++    assert decisions["urgent"].levels == ("normal", "urgent")
++    assert isinstance(decisions["refund"], NoulDecision)
++    assert decisions["refund"].true == "Money returned"
++
++
++def test_explicit_config_and_nearest_parent_discovery(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
++    parent = tmp_path / "repo"
++    child = parent / "nested"
++    child.mkdir(parents=True)
++    parent_config = write_config(parent, "[decision.one]\ntype='noul'\nquestion='One'\n")
++    child_config = write_config(child, "[decision.two]\ntype='noul'\nquestion='Two'\n")
++
++    assert find_config(start=child) == child_config.resolve()
++    assert find_config(start=child / "missing.txt") == child_config.resolve()
++    monkeypatch.setenv("PYJEV_CONFIG", str(parent_config))
++    assert find_config(start=child) == parent_config.resolve()
++    assert load_decision("one", parent_config).name == "one"
++
++
++def test_invalid_schema_includes_path_name_and_field(tmp_path: Path) -> None:
++    path = write_config(
++        tmp_path,
++        """
++[decision.route]
++type = "choice"
++question = "Route?"
++unknown = true
++[decision.route.options]
++only = "One"
++""",
++    )
++    with pytest.raises(DecisionConfigError) as exc_info:
++        load_decisions(path)
++    message = str(exc_info.value)
++    assert str(path) in message
++    assert "route" in message
++    assert "unknown" in message or "options" in message
++
++
++@pytest.mark.parametrize(
++    ("kind", "field"),
++    [("choice", "options"), ("score", "levels")],
++)
++def test_cardinality_is_validated_locally(tmp_path: Path, kind: str, field: str) -> None:
++    values = '["only"]' if kind == "score" else '{ only = "Only" }'
++    path = write_config(
++        tmp_path,
++        f'[decision.bad]\ntype="{kind}"\nquestion="Bad"\n{field}={values}\n',
++    )
++    with pytest.raises(DecisionConfigError, match=field):
++        load_decisions(path)
++
++
++def test_missing_config_error_mentions_override() -> None:
++    with pytest.raises(DecisionConfigError, match=r"\.pyjev\.toml|--config"):
++        find_config(start="/")
+diff --git a/tests/test_release_contract.py b/tests/test_release_contract.py
+new file mode 100644
+index 0000000..be5459f
+--- /dev/null
++++ b/tests/test_release_contract.py
+@@ -0,0 +1,168 @@
++from __future__ import annotations
++
++import json
++from pathlib import Path
++
++from typer.testing import CliRunner
++
++import pyjev.cli as cli
++from pyjev.cli import EXIT_CONFIDENCE, EXIT_USAGE, app
++from pyjev.results import ChoiceResult, ScoreResult
++
++runner = CliRunner()
++
++
++def choice_result(confidence: float = 0.4) -> ChoiceResult:
++    return ChoiceResult(
++        value="engineering",
++        confidence=confidence,
++        probabilities={"billing": 0.1, "engineering": 0.9},
++        model="test",
++        usage={},
++        raw={"choice": "engineering", "confidence": confidence},
++        request_id="request-1",
++    )
++
++
++def score_result(confidence: float = 0.4) -> ScoreResult:
++    return ScoreResult(
++        value=1.5,
++        confidence=confidence,
++        probabilities={0: 0.2, 1: 0.8},
++        legend={0: "low", 1: "high"},
++        model="test",
++        usage={},
++        raw={"score": 1.5, "confidence": confidence},
++        request_id="request-1",
++    )
++
++
++def test_output_conflict_is_rejected_before_api(monkeypatch):
++    def unexpected(*args, **kwargs):
++        raise AssertionError("API should not be called")
++
++    monkeypatch.setattr(cli, "_run_api", unexpected)
++    result = runner.invoke(
++        app,
++        [
++            "choice",
++            "Route?",
++            "--state",
++            "state",
++            "--option",
++            "billing",
++            "--option",
++            "engineering",
++            "--json",
++            "--value",
++        ],
++    )
++    assert result.exit_code == EXIT_USAGE
++    assert "either --json or --value" in result.output
++
++
++def test_invalid_confidence_is_rejected_before_api(monkeypatch):
++    monkeypatch.setattr(cli, "_run_api", lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError()))
++    result = runner.invoke(
++        app,
++        [
++            "choice",
++            "Route?",
++            "--state",
++            "state",
++            "--option",
++            "billing",
++            "--option",
++            "engineering",
++            "--min-confidence",
++            "1.1",
++        ],
++    )
++    assert result.exit_code == EXIT_USAGE
++
++
++def test_invalid_cardinality_is_rejected_before_api(monkeypatch):
++    monkeypatch.setattr(cli, "_run_api", lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError()))
++    result = runner.invoke(app, ["score", "Urgency?", "--state", "state", "--level", "only"])
++    assert result.exit_code == EXIT_USAGE
++    assert "between 2 and 10" in result.output
++
++
++def test_failed_value_gate_has_no_actionable_stdout(monkeypatch):
++    monkeypatch.setattr(cli, "_run_api", lambda *args, **kwargs: choice_result())
++    result = runner.invoke(
++        app,
++        [
++            "choice",
++            "Route?",
++            "--state",
++            "state",
++            "--option",
++            "billing",
++            "--option",
++            "engineering",
++            "--value",
++            "--min-confidence",
++            "0.85",
++        ],
++    )
++    assert result.exit_code == EXIT_CONFIDENCE
++    assert result.stdout == ""
++    assert "0.40" in result.stderr
++    assert "0.85" in result.stderr
++
++
++def test_failed_json_gate_returns_explicit_envelope(monkeypatch):
++    monkeypatch.setattr(cli, "_run_api", lambda *args, **kwargs: score_result())
++    result = runner.invoke(
++        app,
++        [
++            "score",
++            "Urgency?",
++            "--state",
++            "state",
++            "--level",
++            "low",
++            "--level",
++            "high",
++            "--json",
++            "--min-confidence",
++            "0.85",
++        ],
++    )
++    assert result.exit_code == EXIT_CONFIDENCE
++    payload = json.loads(result.stdout)
++    assert payload["gate"] == {"passed": False, "minimum_confidence": 0.85, "confidence": 0.4}
++    assert payload["result"]["request_id"] == "request-1"
++
++
++def test_named_noul_rejects_confidence_before_api(tmp_path: Path, monkeypatch):
++    config = tmp_path / ".pyjev.toml"
++    config.write_text("[decision.refund]\ntype='noul'\nquestion='Refund?'\n", encoding="utf-8")
++    monkeypatch.setattr(cli, "_run_api", lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError()))
++    result = runner.invoke(
++        app,
++        ["decide", "refund", "--config", str(config), "--state", "text", "--min-confidence", "0.8"],
++    )
++    assert result.exit_code == EXIT_USAGE
++    assert "only valid" in result.output
++
++
++def test_decision_management_commands(tmp_path: Path):
++    config = tmp_path / ".pyjev.toml"
++    config.write_text(
++        "[decision.route]\ntype='choice'\nquestion='Route?'\n[decision.route.options]\nbilling='Billing'\nengineering='Technical'\n",
++        encoding="utf-8",
++    )
++    listed = runner.invoke(app, ["decision", "list", "--config", str(config)])
++    assert listed.exit_code == 0
++    assert "route\tchoice" in listed.stdout
++
++    shown = runner.invoke(app, ["decision", "show", "route", "--config", str(config), "--json"])
++    assert shown.exit_code == 0
++    assert json.loads(shown.stdout)["type"] == "choice"
++
++    validated = runner.invoke(app, ["decision", "validate", "--config", str(config)])
++    assert validated.exit_code == 0
++    assert "Valid" in validated.stdout
++    assert "1 decisions" in validated.stdout

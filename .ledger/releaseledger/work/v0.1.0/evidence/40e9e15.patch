@@ -1,0 +1,349 @@
+ README.md                   | 10 +++---
+ examples/.pyjev.toml        |  9 +++--
+ examples/README.md          | 48 +++++++++++++++++++------
+ examples/emergency_snack.py | 88 ++++++++++++++++++++++++++++++++++++++-------
+ examples/haunted_ci.py      | 79 +++++++++++++++++++++++++++++++++++-----
+ pyjev/cli.py                |  1 +
+ tests/test_cli.py           |  5 ++-
+ 7 files changed, 198 insertions(+), 42 deletions(-)
+
+diff --git a/README.md b/README.md
+index 97fdbb8..75671ab 100644
+--- a/README.md
++++ b/README.md
+@@ -112,12 +112,12 @@ Noul has a probability of true rather than a Choice/Score confidence, so `--min-
+
+ ### Exit codes
+
+-| Exit | Meaning                                                                            |
+-| ---: | ---------------------------------------------------------------------------------- |
+-|    0 | Successful result and any confidence gate passed                                   |
++| Exit | Meaning                                                                                             |
++| ---: | --------------------------------------------------------------------------------------------------- |
++|    0 | Successful result and any confidence gate passed                                                    |
+ |    1 | Runtime failure: credentials, keyring, credential-file, TypeSafe API, network, or configuration I/O |
+-|    2 | CLI usage or local argument validation error                                       |
+-|    3 | Valid Choice/Score result obtained, but confidence gate failed                     |
++|    2 | CLI usage or local argument validation error                                                        |
++|    3 | Valid Choice/Score result obtained, but confidence gate failed                                      |
+
+ Expected TypeSafe failures are concise and do not print tracebacks by default.
+
+diff --git a/examples/.pyjev.toml b/examples/.pyjev.toml
+index a511583..52b4fc9 100644
+--- a/examples/.pyjev.toml
++++ b/examples/.pyjev.toml
+@@ -9,8 +9,13 @@ chocolate = "A morale boost for the person holding the pager"
+
+ [decision.haunted-ci]
+ type = "score"
+-question = "How urgent is this haunted CI failure?"
+-levels = ["monitor", "investigate", "interrupt someone", "wake the release manager"]
++question = "How urgently should the team respond to this suspicious CI failure?"
++levels = [
++  "Monitor: probably transient and not blocking; retry and keep working.",
++  "Investigate: suspicious or recurring; inspect logs soon, but nobody needs interrupting.",
++  "Interrupt someone: the release is blocked or repeated failures need an engineer now.",
++  "Wake the release manager: release emergency with no safe workaround; page immediately.",
++]
+
+ [decision.meeting-escape]
+ type = "noul"
+diff --git a/examples/README.md b/examples/README.md
+index b46b219..fb53d33 100644
+--- a/examples/README.md
++++ b/examples/README.md
+@@ -1,19 +1,47 @@
+ # pyjev examples
+
+-These examples use the public Python API and CLI. They intentionally do not assert
+-specific Jev outputs: model responses and confidence values can vary. Set
+-`TYPESAFE_API_KEY` in the environment or configure authentication with `pyjev auth set`;
+-no example contains a key.
++These examples are deliberately verbose. They are meant to be understandable from
++their terminal output without reading the source first.
+
+-From the repository root:
++Set `TYPESAFE_API_KEY` or run `pyjev auth set`, then run from the repository root:
+
+ ```bash
+ python examples/emergency_snack.py
+ python examples/haunted_ci.py
+-printf '%s\n' '{"calendar":"quarterly planning","agenda":[],"owner":null}' |
+-  ./examples/meeting_escape.sh
+ ```
+
+-The shared `examples/.pyjev.toml` demonstrates reusable named Noul, Choice, and Score
+-decisions. The Python examples use a direct Choice and a named Score. The shell example
+-uses a named Choice with a confidence gate and exits nonzero when human review is needed.
++Jev evaluates **state + a typed question** and returns structured data rather than
++free-form text.
++
++- `emergency_snack.py` uses a direct `Choice`. It prints the state, allowed options,
++  selected label, complete probability distribution, confidence, and a tiny
++  confidence-gated application policy. A Choice is a closed-set decision, so Python
++  can inspect every allowed alternative without parsing model prose.
++- `haunted_ci.py` uses the named `haunted-ci` `Score` from `.pyjev.toml`. It shows
++  that a Score can be fractional, prints the ordered legend and level probabilities,
++  and demonstrates how ordinary Python can decline to act when confidence is low.
++
++The examples intentionally show the boundary between Jev/TypeSafe and pyjev:
++
++- TypeSafe supplies state evaluation, Choice and Score semantics, the selected answer
++  or score, probabilities, confidence, and model response metadata.
++- pyjev supplies the `Jev` Python client, direct primitive calls, named decisions from
++  `.pyjev.toml`, and convenient typed result fields such as `value`, `probabilities`,
++  `legend`, and `request_id`. It wraps and preserves TypeSafe's semantics; it does
++  not invent the probability or confidence calculations.
++
++Confidence is useful as an input to ordinary deterministic application policy. The
++thresholds in these examples are teaching examples, not universal recommendations:
++a program can automate a low-stakes action when confidence clears its threshold and
++otherwise leave the decision to a human. Confidence is separate from the selected
++option's probability and should not be described as the probability that an answer is
++correct.
++
++For the Score example, the numeric result is the probability-weighted position over
++ordered levels, so a fractional score is expected and meaningful. The legend and full
++probability distribution show what that fraction means. Choosing the nearest level is
++application logic in this example, not a Jev rule.
++
++The examples intentionally do not assert specific Jev outputs. Model results and
++confidence values may vary. The shared `.pyjev.toml` also contains named Noul and
++Choice declarations for CLI experiments.
+diff --git a/examples/emergency_snack.py b/examples/emergency_snack.py
+index 1c1fd65..794e3e9 100644
+--- a/examples/emergency_snack.py
++++ b/examples/emergency_snack.py
+@@ -1,24 +1,86 @@
+-"""Use a direct Python Choice for a mildly urgent snack decision."""
++"""Demonstrate a direct Choice decision and how application code uses uncertainty."""
++
++from __future__ import annotations
++
++import json
+
+ from pyjev import Jev
+
++QUESTION = "Which snack should the on-call engineer bring?"
++STATE = {
++    "incident": "The checkout service is degraded during a Friday-night deploy.",
++    "on_call": {
++        "condition": "skipped dinner",
++        "hands": "typing continuously",
++        "mood": "one failed retry away from naming servers after enemies",
++    },
++    "constraints": [
++        "must be edible one-handed",
++        "must not make the keyboard sticky",
++        "must survive sitting beside a warm laptop",
++    ],
++}
++CHOICES = {
++    "banana": "Fast fuel, portable, peel keeps the keyboard clean",
++    "pretzels": "Salty, dry, durable, and compatible with incident keyboards",
++    "chocolate": "Excellent morale boost, but risky near warm hardware",
++    "ramen": "Emotionally correct, operationally incompatible with one-handed typing",
++}
++AUTO_ACCEPT_CONFIDENCE = 0.75
++
+
+ def main() -> None:
+-    state = {
+-        "incident": "The service is degraded and the on-call engineer has skipped lunch.",
+-        "constraints": ["portable", "not sticky", "available at a nearby shop"],
+-    }
++    print("=== Emergency Snack Tribunal ===")
++    print("This is a direct Jev Choice: structured state + one closed set of options.\n")
++
++    print("State sent to Jev:")
++    print(json.dumps(STATE, indent=2))
++
++    print("\nQuestion:")
++    print(f"  {QUESTION}")
++
++    print("\nAllowed choices:")
++    for label, description in CHOICES.items():
++        print(f"  {label:9} {description}")
++
+     with Jev() as jev:
+         result = jev.choice(
+-            "Which snack should the on-call engineer bring?",
+-            state=state,
+-            choices={
+-                "fruit": "Portable fruit that will not make the keyboard sticky",
+-                "pretzels": "A salty snack that survives a long incident",
+-                "chocolate": "A morale boost for the person holding the pager",
+-            },
++            QUESTION,
++            state=STATE,
++            choices=CHOICES,
++        )
++
++    print("\nStructured result:")
++    print(f"  selected    {result.value}")
++    print(f"  confidence  {result.confidence:.2f}")
++    print(f"  model       {result.model}")
++    if result.request_id:
++        print(f"  request_id  {result.request_id}")
++
++    print("\nProbability distribution:")
++    for label, probability in sorted(
++        result.probabilities.items(),
++        key=lambda item: item[1],
++        reverse=True,
++    ):
++        selected = "  <-- selected" if label == result.value else ""
++        print(f"  {label:9} {probability:6.1%}{selected}")
++
++    print("\nApplication policy:")
++    print("  Confidence is a separate signal from the selected option's probability.")
++    print(
++        f"  The demo auto-accept threshold is {AUTO_ACCEPT_CONFIDENCE:.2f}; it is application policy, not a Jev rule.",
++    )
++    if result.confidence >= AUTO_ACCEPT_CONFIDENCE:
++        print(
++            f"  confidence >= {AUTO_ACCEPT_CONFIDENCE:.2f}: trust the structured decision "
++            f"and send {result.value!r} to the snack-fetching robot."
++        )
++    else:
++        print(
++            f"  confidence < {AUTO_ACCEPT_CONFIDENCE:.2f}: do not automate lunch. "
++            "The on-call human keeps snack sovereignty."
+         )
+-    print(f"choice={result.value} confidence={result.confidence:.2f}")
+
+
+ if __name__ == "__main__":
+diff --git a/examples/haunted_ci.py b/examples/haunted_ci.py
+index 864a3fe..929035d 100644
+--- a/examples/haunted_ci.py
++++ b/examples/haunted_ci.py
+@@ -1,22 +1,83 @@
+-"""Use a reusable named Score decision with structured state."""
++"""Demonstrate a reusable named Score decision and confidence-aware application logic."""
+
++from __future__ import annotations
++
++import json
+ from pathlib import Path
+
+ from pyjev import Jev
+
+ CONFIG = Path(__file__).with_name(".pyjev.toml")
++DECISION = "haunted-ci"
++STATE = {
++    "workflow": "release",
++    "clock": "02:13",
++    "symptom": ("Integration tests pass twice, then fail on the third retry with no code changes."),
++    "release_blocked": True,
++    "recent_changes": ["dependency refresh", "new cache key"],
++    "evidence": [
++        "rerunning the failed shard sometimes fixes it",
++        "the failure moved to a different test after clearing the cache",
++        "nobody can reproduce it locally",
++    ],
++    "humans_awake": False,
++}
++ACT_CONFIDENCE = 0.65
+
+
+ def main() -> None:
+-    state = {
+-        "workflow": "release",
+-        "symptom": "The integration job fails only on the third retry.",
+-        "recent_changes": ["dependency refresh", "new cache key"],
+-        "humans_awake": True,
+-    }
++    print("=== Haunted CI Triage ===")
++    print(
++        "This is a named pyjev Score decision: the question and ordered rubric "
++        f"live in {CONFIG.name}, while runtime state stays in Python.\n"
++    )
++
++    print(f"Decision name: {DECISION}")
++    print("State sent to Jev:")
++    print(json.dumps(STATE, indent=2))
++
+     with Jev() as jev:
+-        result = jev.decide("haunted-ci", state=state, config=CONFIG)
+-    print(f"score={result.value} confidence={result.confidence:.2f}")
++        result = jev.decide(
++            DECISION,
++            state=STATE,
++            config=CONFIG,
++        )
++
++    print("\nStructured result:")
++    print(f"  score       {result.value:.2f}")
++    print(f"  confidence  {result.confidence:.2f}")
++    print(f"  model       {result.model}")
++    if result.request_id:
++        print(f"  request_id  {result.request_id}")
++
++    print("\nScore rubric and probability distribution:")
++    for level in sorted(result.legend):
++        description = result.legend[level]
++        probability = result.probabilities[level]
++        print(f"  {level}: {probability:6.1%}  {description}")
++
++    print(
++        "\nThe score may be fractional: it is the probability-weighted position "
++        "across the ordered levels, not a hidden fifth label."
++    )
++
++    print("\nApplication policy:")
++    print(f"  The demo action threshold is {ACT_CONFIDENCE:.2f}; it is application policy, not a Jev rule.")
++    if result.confidence < ACT_CONFIDENCE:
++        print(
++            f"  confidence < {ACT_CONFIDENCE:.2f}: do not wake anybody based on "
++            "ghost vibes. Collect more evidence or ask a human to review."
++        )
++    else:
++        nearest_level = min(
++            result.legend,
++            key=lambda level: abs(level - result.value),
++        )
++        print(
++            f"  confidence >= {ACT_CONFIDENCE:.2f}: nearest rubric level is "
++            f"{nearest_level}; application action = "
++            f"{result.legend[nearest_level]!r}"
++        )
+
+
+ if __name__ == "__main__":
+diff --git a/pyjev/cli.py b/pyjev/cli.py
+index 1cc0842..6d41ba0 100644
+--- a/pyjev/cli.py
++++ b/pyjev/cli.py
+@@ -480,6 +480,7 @@ def auth_delete() -> None:
+     if os.getenv(ENV_NAME) is not None:
+         typer.echo(f"{ENV_NAME} is still set and remains the active credential.")
+
++
+ @decision_app.command("list")
+ def decision_list(
+     config: Path | None = typer.Option(None, "--config", help="Path to a .pyjev.toml file."),
+diff --git a/tests/test_cli.py b/tests/test_cli.py
+index 8595c7d..d6e8f40 100644
+--- a/tests/test_cli.py
++++ b/tests/test_cli.py
+@@ -90,6 +90,7 @@ def test_auth_set_explicit_key_after_keyring_failure_never_confirms(monkeypatch)
+         "set_api_key",
+         lambda key: (_ for _ in ()).throw(CredentialError("keyring unavailable")),
+     )
++
+     def fail_confirm(*args, **kwargs):
+         raise AssertionError("unexpected confirmation")
+
+@@ -161,9 +162,7 @@ def test_auth_status_handles_credential_file_error(monkeypatch):
+     monkeypatch.setattr(
+         cli,
+         "credential_source",
+-        lambda: (_ for _ in ()).throw(
+-            CredentialError("Could not read credential file /tmp/x: denied")
+-        ),
++        lambda: (_ for _ in ()).throw(CredentialError("Could not read credential file /tmp/x: denied")),
+     )
+
+     result = runner.invoke(app, ["auth", "status"])

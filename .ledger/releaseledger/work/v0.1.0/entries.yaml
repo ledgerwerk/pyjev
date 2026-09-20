@@ -1,0 +1,206 @@
+schema: releaseledger.entry-batch.v1
+operation: create
+schema_version: 1
+object_type: release_entry_batch
+release_version: v0.1.0
+git_base_ref: 7fc96795685dfc13c432851a31e466c6b082121e
+git_base_sha: 7fc96795685dfc13c432851a31e466c6b082121e
+git_head_ref: d17a50b31b664678425c10e34f8176bf062ae5d8
+git_head_sha: d17a50b31b664678425c10e34f8176bf062ae5d8
+include_merges: nontrivial
+entries:
+  - kind: added
+    summary: "Added the core Python and CLI interfaces for Noul, Choice, and Score decisions"
+    status: accepted
+    source_refs:
+      - git:aa852b79ec682f348fa9059b87deadbda7518881
+    paths:
+      - pyjev/__init__.py
+      - pyjev/__main__.py
+      - pyjev/cli.py
+      - pyjev/client.py
+      - pyjev/credentials.py
+      - pyjev/results.py
+      - pyproject.toml
+    sources:
+      - git:aa852b79ec682f348fa9059b87deadbda7518881
+    prs: []
+    issues: []
+    contributors:
+      - "@holgern"
+  - kind: added
+    summary: "Added reusable TOML decision declarations, local validation, and explicit confidence-gated CLI automation"
+    status: accepted
+    source_refs:
+      - git:cb50f890dd9370cbd569fc2ac8aa5bcd770c9433
+    paths:
+      - pyjev/decisions.py
+      - pyjev/client.py
+      - pyjev/cli.py
+      - pyjev/results.py
+      - tests/test_decisions.py
+      - tests/test_release_contract.py
+    sources:
+      - git:cb50f890dd9370cbd569fc2ac8aa5bcd770c9433
+    prs: []
+    issues: []
+    contributors:
+      - "@holgern"
+  - kind: added
+    summary: "Added credential management and runnable Python and shell examples"
+    status: accepted
+    source_refs:
+      - git:50bf96b5068fc80e31312d782424cff07e585c9f
+    paths:
+      - pyjev/credentials.py
+      - pyjev/cli.py
+      - examples/.pyjev.toml
+      - examples/README.md
+      - examples/emergency_snack.py
+      - examples/haunted_ci.py
+      - examples/meeting_escape.sh
+      - tests/test_credentials.py
+    sources:
+      - git:50bf96b5068fc80e31312d782424cff07e585c9f
+    prs: []
+    issues: []
+    contributors:
+      - "@holgern"
+  - kind: docs
+    summary: "Documented clearer application-policy guidance in the examples"
+    status: accepted
+    source_refs:
+      - git:40e9e15345fa89bd6f2ff04340de18186b970b6f
+    paths:
+      - README.md
+      - examples/README.md
+      - examples/emergency_snack.py
+      - examples/haunted_ci.py
+    sources:
+      - git:40e9e15345fa89bd6f2ff04340de18186b970b6f
+    prs: []
+    issues: []
+    contributors:
+      - "@holgern"
+  - kind: added
+    summary: "Added a playable Connect Four example with structured candidate moves"
+    status: accepted
+    source_refs:
+      - git:b0d59e0b11d3483967189f95f23dd845413ed967
+    paths:
+      - examples/README.md
+      - examples/connect_four.py
+    sources:
+      - git:b0d59e0b11d3483967189f95f23dd845413ed967
+    prs: []
+    issues: []
+    contributors:
+      - "@holgern"
+  - kind: changed
+    summary: "Improved Connect Four with deterministic tactical filtering so Jev asks only among admissible moves"
+    status: accepted
+    source_refs:
+      - git:a6a09dc7d709bef6abc32209e04439175ecef75b
+    paths:
+      - examples/README.md
+      - examples/connect_four.py
+      - tests/test_connect_four.py
+    sources:
+      - git:a6a09dc7d709bef6abc32209e04439175ecef75b
+    prs: []
+    issues: []
+    contributors:
+      - "@holgern"
+  - kind: internal
+    internal: true
+    summary: "Changed repository automation to dedicated test, lint, coverage, pre-commit, and publishing workflows"
+    status: accepted
+    source_refs:
+      - git:8a0ae0f5b37d3273abbc3034557a3b435a82c5da
+    paths:
+      - .github/workflows/codecov.yml
+      - .github/workflows/pre-commit.yml
+      - .github/workflows/python-publish.yml
+      - .github/workflows/tests.yml
+    sources:
+      - git:8a0ae0f5b37d3273abbc3034557a3b435a82c5da
+    prs: []
+    issues: []
+    contributors:
+      - "@holgern"
+  - kind: docs
+    summary: "Documented the Sphinx build and expanded the tested Connect Four walkthrough"
+    status: accepted
+    source_refs:
+      - git:5c07c84b41ac5fe08c67772ac2a9cb2dcefaef2b
+    paths:
+      - docs/Makefile
+      - docs/conf.py
+      - docs/make.bat
+      - docs/make.py
+      - docs/requirements.txt
+      - examples/connect_four.py
+      - tests/test_connect_four.py
+    sources:
+      - git:5c07c84b41ac5fe08c67772ac2a9cb2dcefaef2b
+    prs: []
+    issues: []
+    contributors:
+      - "@holgern"
+  - kind: internal
+    internal: true
+    summary: "Improved static typing across client and decision modules"
+    status: accepted
+    source_refs:
+      - git:775005735081c33b42807d1c44107a136c2734de
+    paths:
+      - pyjev/client.py
+      - pyjev/decisions.py
+    sources:
+      - git:775005735081c33b42807d1c44107a136c2734de
+    prs: []
+    issues: []
+    contributors:
+      - "@holgern"
+  - kind: added
+    summary: "Added native async support, offline decision compilation, mixed-question bundles, and comprehensive API documentation"
+    status: accepted
+    source_refs:
+      - git:8177c9ca736b263f8dc7886a24dc2b2c57c2a222
+    paths:
+      - docs
+      - pyjev/__init__.py
+      - pyjev/cli.py
+      - pyjev/client.py
+      - pyjev/compile.py
+      - pyjev/decisions.py
+      - pyjev/results.py
+      - tests/test_async.py
+      - tests/test_bundles.py
+      - tests/test_compile.py
+    sources:
+      - git:8177c9ca736b263f8dc7886a24dc2b2c57c2a222
+    prs: []
+    issues: []
+    contributors:
+      - "@holgern"
+  - kind: fixed
+    summary: "Fixed bundle output handling and strengthened typed request-preview and example paths"
+    status: accepted
+    source_refs:
+      - git:d17a50b31b664678425c10e34f8176bf062ae5d8
+    paths:
+      - examples/connect_four.py
+      - examples/haunted_ci.py
+      - pyjev/cli.py
+      - pyjev/client.py
+      - pyjev/compile.py
+      - tests/test_async.py
+      - tests/test_bundles.py
+      - tests/test_client.py
+    sources:
+      - git:d17a50b31b664678425c10e34f8176bf062ae5d8
+    prs: []
+    issues: []
+    contributors:
+      - "@holgern"

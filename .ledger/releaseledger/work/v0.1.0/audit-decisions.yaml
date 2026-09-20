@@ -1,0 +1,224 @@
+rows:
+  - sha: aa852b79ec682f348fa9059b87deadbda7518881
+    inspected: true
+    inspected_paths:
+      - .codecrate.toml
+      - .gitignore
+      - .pre-commit-config.yaml
+      - README.md
+      - pyjev/__init__.py
+      - pyjev/__main__.py
+      - pyjev/cli.py
+      - pyjev/client.py
+      - pyjev/credentials.py
+      - pyjev/py.typed
+      - pyjev/results.py
+      - pyproject.toml
+      - tests/test_cli.py
+      - tests/test_client.py
+      - tests/test_credentials.py
+    observed_behavior: "Introduced the pyjev package with Python Jev and CLI entry points, typed result wrappers, credential lookup, and initial request tests."
+    public_impact: public
+    decision: accepted
+    target_entry_key: null
+    target_entry_id: null
+    notes: "Initial product surface for the first release."
+    stale: false
+  - sha: cb50f890dd9370cbd569fc2ac8aa5bcd770c9433
+    inspected: true
+    inspected_paths:
+      - .github/workflows/ci.yml
+      - .pre-commit-config.yaml
+      - README.md
+      - pyjev/__init__.py
+      - pyjev/cli.py
+      - pyjev/client.py
+      - pyjev/decisions.py
+      - pyjev/results.py
+      - pyproject.toml
+      - tests/test_client.py
+      - tests/test_decisions.py
+      - tests/test_release_contract.py
+    observed_behavior: "Added reusable TOML named decisions, model precedence, local validation, request metadata preservation, and confidence-aware CLI behavior with contract tests."
+    public_impact: public
+    decision: accepted
+    target_entry_key: null
+    target_entry_id: null
+    notes: "Named decisions and confidence policies are public behavior."
+    stale: false
+  - sha: 50bf96b5068fc80e31312d782424cff07e585c9f
+    inspected: true
+    inspected_paths:
+      - .ledger/ledger.toml
+      - .ledger/taskledger/.ledger-project.toml
+      - .ledger/taskledger/config.toml
+      - README.md
+      - examples/.pyjev.toml
+      - examples/README.md
+      - examples/emergency_snack.py
+      - examples/haunted_ci.py
+      - examples/meeting_escape.sh
+      - pyjev/cli.py
+      - pyjev/credentials.py
+      - tests/test_cli.py
+      - tests/test_credentials.py
+    observed_behavior: "Added runnable Python and shell examples, shared named-decision configuration, and explicit keyring/file credential management with safe fallback behavior."
+    public_impact: public
+    decision: accepted
+    target_entry_key: null
+    target_entry_id: null
+    notes: "Examples and credential ergonomics are public documentation/product behavior."
+    stale: false
+  - sha: 40e9e15345fa89bd6f2ff04340de18186b970b6f
+    inspected: true
+    inspected_paths:
+      - README.md
+      - examples/.pyjev.toml
+      - examples/README.md
+      - examples/emergency_snack.py
+      - examples/haunted_ci.py
+      - pyjev/cli.py
+      - tests/test_cli.py
+    observed_behavior: "Expanded the examples with clearer application policy guidance and aligned the CLI example behavior with the documented decision workflow."
+    public_impact: docs
+    decision: accepted
+    target_entry_key: null
+    target_entry_id: null
+    notes: "Documentation and example usability improvements."
+    stale: false
+  - sha: b0d59e0b11d3483967189f95f23dd845413ed967
+    inspected: true
+    inspected_paths:
+      - examples/README.md
+      - examples/connect_four.py
+    observed_behavior: "Added a playable Connect Four example that keeps board mechanics in Python and presents candidate moves to Jev as a typed choice."
+    public_impact: public
+    decision: accepted
+    target_entry_key: null
+    target_entry_id: null
+    notes: "Runnable example demonstrating the product boundary."
+    stale: false
+  - sha: a6a09dc7d709bef6abc32209e04439175ecef75b
+    inspected: true
+    inspected_paths:
+      - examples/README.md
+      - examples/connect_four.py
+      - tests/test_connect_four.py
+    observed_behavior: "Added deterministic tactical filtering, one-ply safety analysis, and tests so the Connect Four demo asks Jev only to choose among admissible moves."
+    public_impact: public
+    decision: accepted
+    target_entry_key: null
+    target_entry_id: null
+    notes: "Improves correctness and explains the deterministic-logic boundary."
+    stale: false
+  - sha: 8a0ae0f5b37d3273abbc3034557a3b435a82c5da
+    inspected: true
+    inspected_paths:
+      - .github/workflows/ci.yml
+      - .github/workflows/codecov.yml
+      - .github/workflows/pre-commit.yml
+      - .github/workflows/python-publish.yml
+      - .github/workflows/tests.yml
+    observed_behavior: "Replaced the initial CI workflow with separate test, lint, coverage, pre-commit, and publishing workflows."
+    public_impact: internal
+    decision: internal
+    target_entry_key: null
+    target_entry_id: null
+    notes: "Release and repository automation only; retained as internal provenance."
+    stale: false
+  - sha: 5c07c84b41ac5fe08c67772ac2a9cb2dcefaef2b
+    inspected: true
+    inspected_paths:
+      - .ledger/ledger.toml
+      - .ledger/releaseledger/.ledger-project.toml
+      - .ledger/releaseledger/config.toml
+      - .ledger/releaseledger/data/.ledger-project.toml
+      - README.md
+      - docs/Makefile
+      - docs/conf.py
+      - docs/make.bat
+      - docs/make.py
+      - docs/requirements.txt
+      - examples/connect_four.py
+      - tests/test_connect_four.py
+    observed_behavior: "Added the Sphinx documentation build configuration and expanded the Connect Four demo with a documented, tested game loop and traceable tactical output."
+    public_impact: docs
+    decision: accepted
+    target_entry_key: null
+    target_entry_id: null
+    notes: "Documentation infrastructure and example behavior."
+    stale: false
+  - sha: 775005735081c33b42807d1c44107a136c2734de
+    inspected: true
+    inspected_paths:
+      - pyjev/client.py
+      - pyjev/decisions.py
+    observed_behavior: "Removed static type-checking suppressions by correcting the client and decision typing annotations."
+    public_impact: internal
+    decision: internal
+    target_entry_key: null
+    target_entry_id: null
+    notes: "Internal quality maintenance; retained as internal provenance."
+    stale: false
+  - sha: 8177c9ca736b263f8dc7886a24dc2b2c57c2a222
+    inspected: true
+    inspected_paths:
+      - .github/workflows/tests.yml
+      - README.md
+      - docs/api/client.md
+      - docs/api/index.md
+      - docs/api/results.md
+      - docs/authentication.md
+      - docs/changelog.md
+      - docs/cli.md
+      - docs/comparisons.md
+      - docs/concepts.md
+      - docs/conf.py
+      - docs/confidence.md
+      - docs/debugging.md
+      - docs/development.md
+      - docs/examples.md
+      - docs/getting-started.md
+      - docs/index.md
+      - docs/make.py
+      - docs/named-decisions.md
+      - docs/python-api.md
+      - examples/.pyjev.toml
+      - examples/connect_four.py
+      - pyjev/__init__.py
+      - pyjev/cli.py
+      - pyjev/client.py
+      - pyjev/compile.py
+      - pyjev/decisions.py
+      - pyjev/results.py
+      - tests/test_async.py
+      - tests/test_bundles.py
+      - tests/test_compile.py
+      - tests/test_connect_four.py
+      - tests/test_decisions.py
+      - tests/test_docs.py
+    observed_behavior: "Added native async client support, offline named-decision compilation, mixed-question bundles, richer public exports, and comprehensive user/API documentation."
+    public_impact: public
+    decision: accepted
+    target_entry_key: null
+    target_entry_id: null
+    notes: "Major public API and documentation expansion."
+    stale: false
+  - sha: d17a50b31b664678425c10e34f8176bf062ae5d8
+    inspected: true
+    inspected_paths:
+      - examples/connect_four.py
+      - examples/haunted_ci.py
+      - pyjev/cli.py
+      - pyjev/client.py
+      - pyjev/compile.py
+      - tests/test_async.py
+      - tests/test_bundles.py
+      - tests/test_client.py
+    observed_behavior: "Fixed bundle output handling, strengthened typed result and request-preview paths, and made the tactical example's diagnostic data type-safe."
+    public_impact: public
+    decision: accepted
+    target_entry_key: null
+    target_entry_id: null
+    notes: "Correctness and quality fixes visible in bundle output and examples."
+    stale: false

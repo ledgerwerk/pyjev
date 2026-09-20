@@ -1,0 +1,39 @@
+ pyjev/client.py    | 4 ++--
+ pyjev/decisions.py | 2 +-
+ 2 files changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/pyjev/client.py b/pyjev/client.py
+index 0fc5eee..0995753 100644
+--- a/pyjev/client.py
++++ b/pyjev/client.py
+@@ -7,7 +7,7 @@ from pathlib import Path
+ from types import TracebackType
+ from typing import Any
+
+-from typesafe_sdk import Choice, Noul, Question, Score, TypeSafeClient
++from typesafe_sdk import Choice, Noul, NoulCriteria, Question, Score, TypeSafeClient
+
+ from .credentials import get_api_key
+ from .results import ChoiceResult, NoulResult, ScoreResult
+@@ -99,7 +99,7 @@ class Jev:
+         false: Any | None = None,
+         model: str | None = None,
+     ) -> NoulResult:
+-        criteria = None
++        criteria: NoulCriteria | None = None
+         if true is not None or false is not None:
+             criteria = {"true": true, "false": false}
+
+diff --git a/pyjev/decisions.py b/pyjev/decisions.py
+index c8798f8..9c90c12 100644
+--- a/pyjev/decisions.py
++++ b/pyjev/decisions.py
+@@ -11,7 +11,7 @@ from typing import Any
+ try:  # Python 3.11+
+     import tomllib
+ except ModuleNotFoundError:  # pragma: no cover - exercised on Python 3.10
+-    import tomli as tomllib  # type: ignore[no-redef]
++    import tomli as tomllib  # type: ignore[import-not-found, no-redef]
+
+
+ class DecisionConfigError(ValueError):

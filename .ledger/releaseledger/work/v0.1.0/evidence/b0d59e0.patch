@@ -1,0 +1,296 @@
+ examples/README.md       |  14 ++-
+ examples/connect_four.py | 247 +++++++++++++++++++++++++++++++++++++++++++++++
+ 2 files changed, 260 insertions(+), 1 deletion(-)
+
+diff --git a/examples/README.md b/examples/README.md
+index fb53d33..8f8e000 100644
+--- a/examples/README.md
++++ b/examples/README.md
+@@ -8,6 +8,7 @@ Set `TYPESAFE_API_KEY` or run `pyjev auth set`, then run from the repository roo
+ ```bash
+ python examples/emergency_snack.py
+ python examples/haunted_ci.py
++python examples/connect_four.py
+ ```
+
+ Jev evaluates **state + a typed question** and returns structured data rather than
+@@ -21,7 +22,12 @@ free-form text.
+   that a Score can be fractional, prints the ordered legend and level probabilities,
+   and demonstrates how ordinary Python can decline to act when confidence is low.
+
+-The examples intentionally show the boundary between Jev/TypeSafe and pyjev:
++- `connect_four.py` is an interactive game against Jev. The board and rules are
++  structured state, and every Jev turn is a direct dynamic `Choice` whose options
++  are only the currently legal columns. Python enforces gravity, legal moves, wins,
++  and draws; Jev chooses among the valid actions. The terminal also prints Jev's
++  confidence and complete move probability distribution.
++  The examples intentionally show the boundary between Jev/TypeSafe and pyjev:
+
+ - TypeSafe supplies state evaluation, Choice and Score semantics, the selected answer
+   or score, probabilities, confidence, and model response metadata.
+@@ -37,6 +43,12 @@ otherwise leave the decision to a human. Confidence is separate from the selecte
+ option's probability and should not be described as the probability that an answer is
+ correct.
+
++Connect Four deliberately does not confidence-gate Jev's move. Low confidence is
++shown to the player, but Jev still has to choose a legal move because uncertainty
++is part of the game.
++
++Do not put this decision in `.pyjev.toml`; its options are dynamic.
++
+ For the Score example, the numeric result is the probability-weighted position over
+ ordered levels, so a fractional score is expected and meaningful. The legend and full
+ probability distribution show what that fraction means. Choosing the nearest level is
+diff --git a/examples/connect_four.py b/examples/connect_four.py
+new file mode 100644
+index 0000000..3c85c11
+--- /dev/null
++++ b/examples/connect_four.py
+@@ -0,0 +1,247 @@
++"""Play Connect Four against Jev in the terminal."""
++
++from __future__ import annotations
++
++from pyjev import ChoiceResult, Jev
++
++ROWS = 6
++COLUMNS = 7
++EMPTY = "."
++HUMAN = "x"
++JEV_PIECE = "o"
++
++QUESTION = (
++    "You are playing Connect Four as 'o'. Choose the strongest legal column "
++    "for your next move. Prefer an immediate winning move. Otherwise block an "
++    "immediate winning move by 'x'. Otherwise choose a move that improves your "
++    "chance of making four in a row while avoiding giving 'x' an immediate win."
++)
++
++DIRECTIONS = (
++    (0, 1),
++    (1, 0),
++    (1, 1),
++    (1, -1),
++)
++
++
++def new_board() -> list[list[str]]:
++    """Return an empty six-row by seven-column board."""
++    return [[EMPTY for _ in range(COLUMNS)] for _ in range(ROWS)]
++
++
++def render_board(board: list[list[str]]) -> str:
++    """Render a board with one-based column labels for the terminal."""
++    lines = [
++        "    " + " ".join(str(column) for column in range(1, COLUMNS + 1)),
++        "  +" + "-" * (COLUMNS * 2 + 1) + "+",
++    ]
++
++    for row in board:
++        lines.append("  | " + " ".join(row) + " |")
++
++    lines.append("  +" + "-" * (COLUMNS * 2 + 1) + "+")
++    return "\n".join(lines)
++
++
++def legal_columns(board: list[list[str]]) -> list[int]:
++    """Return zero-based columns that still have room for a piece."""
++    return [column for column in range(COLUMNS) if board[0][column] == EMPTY]
++
++
++def landing_row(board: list[list[str]], column: int) -> int | None:
++    """Return the zero-based row where a piece lands, or None if full."""
++    for row in range(ROWS - 1, -1, -1):
++        if board[row][column] == EMPTY:
++            return row
++    return None
++
++
++def drop_piece(board: list[list[str]], column: int, piece: str) -> int:
++    """Drop a piece into a column and return the row it occupies."""
++    row = landing_row(board, column)
++    if row is None:
++        raise ValueError(f"column {column + 1} is full")
++
++    board[row][column] = piece
++    return row
++
++
++def has_four(board: list[list[str]], piece: str) -> bool:
++    """Return whether piece occupies four contiguous cells in any direction."""
++    for row in range(ROWS):
++        for column in range(COLUMNS):
++            if board[row][column] != piece:
++                continue
++
++            for row_step, column_step in DIRECTIONS:
++                if all(
++                    0 <= row + step * row_step < ROWS
++                    and 0 <= column + step * column_step < COLUMNS
++                    and board[row + step * row_step][column + step * column_step] == piece
++                    for step in range(1, 4)
++                ):
++                    return True
++
++    return False
++
++
++def board_state(board: list[list[str]]) -> list[str]:
++    """Serialize the board from top row to bottom row."""
++    return ["".join(row) for row in board]
++
++
++def build_jev_state(board: list[list[str]]) -> dict[str, object]:
++    """Build the structured state supplied to Jev for the next o move."""
++    legal = legal_columns(board)
++    return {
++        "game": "Connect Four",
++        "board_encoding": ("6 strings from top row to bottom row; '.' is empty, 'x' is the human opponent, 'o' is you"),
++        "board": board_state(board),
++        "you": JEV_PIECE,
++        "opponent": HUMAN,
++        "turn": JEV_PIECE,
++        "legal_columns": [column + 1 for column in legal],
++        "move_number": 1 + sum(cell != EMPTY for row in board for cell in row),
++        "rules": [
++            "The board has 6 rows and 7 columns.",
++            "A move drops one piece into a column; gravity places it in the lowest empty cell.",
++            "Four equal pieces horizontally, vertically, or diagonally wins immediately.",
++        ],
++    }
++
++
++def jev_choices(board: list[list[str]]) -> dict[str, str]:
++    """Build a Choice set containing only the currently legal columns."""
++    choices: dict[str, str] = {}
++
++    for column in legal_columns(board):
++        row = landing_row(board, column)
++        assert row is not None
++
++        label = str(column + 1)
++        choices[label] = f"Drop o into column {column + 1}; it lands in row {row + 1} counting rows from the top."
++
++    return choices
++
++
++def prompt_human_column(board: list[list[str]]) -> int | None:
++    """Prompt until the human enters a legal zero-based column or quits."""
++    while True:
++        try:
++            raw = input("\nYour move [1-7, q]: ").strip().lower()
++        except (EOFError, KeyboardInterrupt):
++            print()
++            return None
++
++        if raw in {"q", "quit"}:
++            return None
++
++        try:
++            number = int(raw)
++        except ValueError:
++            print("Please enter a column from 1 to 7, or q to quit.")
++            continue
++
++        if not 1 <= number <= COLUMNS:
++            print("Column must be between 1 and 7.")
++            continue
++
++        column = number - 1
++        if column not in legal_columns(board):
++            print(f"Column {number} is full. Choose another column.")
++            continue
++
++        return column
++
++
++def choose_jev_column(jev: Jev, board: list[list[str]]) -> ChoiceResult:
++    """Ask Jev to choose a legal column for the current board."""
++    legal = legal_columns(board)
++    if not legal:
++        raise RuntimeError("Jev was asked to move on a full board")
++
++    result = jev.choice(
++        QUESTION,
++        state=build_jev_state(board),
++        choices=jev_choices(board),
++    )
++
++    try:
++        column = int(result.value) - 1
++    except (TypeError, ValueError) as exc:
++        raise RuntimeError(f"Jev returned a non-numeric column: {result.value!r}") from exc
++
++    if column not in legal:
++        raise RuntimeError(f"Jev returned an illegal column: {result.value!r}")
++
++    return result
++
++
++def print_jev_result(result: ChoiceResult) -> None:
++    """Print Jev's selected move and its complete choice distribution."""
++    print(f"\nJev move: column {result.value}")
++    print(f"confidence: {result.confidence:.2f}")
++    print("move probabilities:")
++
++    for label, probability in sorted(
++        result.probabilities.items(),
++        key=lambda item: item[1],
++        reverse=True,
++    ):
++        selected = "  <-- selected" if label == result.value else ""
++        print(f"  {label}  {probability:6.1%}{selected}")
++
++
++def main() -> None:
++    """Run an interactive human-versus-Jev Connect Four game."""
++    board = new_board()
++
++    print("=== Connect Four: you vs Jev ===")
++    print("You are x. Jev is o.")
++    print("Get four in a row horizontally, vertically, or diagonally.")
++    print("Enter a column number 1-7. Enter q to quit.")
++    print()
++    print(render_board(board))
++
++    try:
++        with Jev() as jev:
++            while True:
++                human_column = prompt_human_column(board)
++                if human_column is None:
++                    print("Game ended.")
++                    return
++
++                drop_piece(board, human_column, HUMAN)
++                print()
++                print(render_board(board))
++
++                if has_four(board, HUMAN):
++                    print("\nYou win!")
++                    return
++
++                if not legal_columns(board):
++                    print("\nDraw: the board is full.")
++                    return
++
++                result = choose_jev_column(jev, board)
++                print_jev_result(result)
++
++                jev_column = int(result.value) - 1
++                drop_piece(board, jev_column, JEV_PIECE)
++                print()
++                print(render_board(board))
++
++                if has_four(board, JEV_PIECE):
++                    print("\nJev wins!")
++                    return
++
++                if not legal_columns(board):
++                    print("\nDraw: the board is full.")
++                    return
++    except KeyboardInterrupt:
++        print("\nGame ended.")
++
++
++if __name__ == "__main__":
++    main()

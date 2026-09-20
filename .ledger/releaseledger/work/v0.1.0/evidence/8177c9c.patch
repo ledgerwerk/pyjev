@@ -1,0 +1,2906 @@
+ .github/workflows/tests.yml |  33 +++--
+ README.md                   | 262 +++++-------------------------------
+ docs/api/client.md          |   6 +
+ docs/api/index.md           |  11 ++
+ docs/api/results.md         |   6 +
+ docs/authentication.md      |  30 +++++
+ docs/changelog.md           |   4 +
+ docs/cli.md                 |  71 ++++++++++
+ docs/comparisons.md         |  19 +++
+ docs/concepts.md            |  58 ++++++++
+ docs/conf.py                |  84 +++---------
+ docs/confidence.md          |  35 +++++
+ docs/debugging.md           |  26 ++++
+ docs/development.md         |  27 ++++
+ docs/examples.md            |  27 ++++
+ docs/getting-started.md     |  92 +++++++++++++
+ docs/index.md               |  68 ++++++++++
+ docs/make.py                | 119 ++++++-----------
+ docs/named-decisions.md     |  82 ++++++++++++
+ docs/python-api.md          |  83 ++++++++++++
+ examples/.pyjev.toml        |   3 +
+ examples/connect_four.py    |  28 +---
+ pyjev/__init__.py           |  11 +-
+ pyjev/cli.py                |  58 ++++++--
+ pyjev/client.py             | 319 +++++++++++++++++++++++++++++++++-----------
+ pyjev/compile.py            | 144 ++++++++++++++++++++
+ pyjev/decisions.py          | 124 +++++++++++++----
+ pyjev/results.py            |  35 ++++-
+ pyproject.toml              |   7 +-
+ tests/test_async.py         |  60 +++++++++
+ tests/test_bundles.py       | 133 ++++++++++++++++++
+ tests/test_compile.py       |  54 ++++++++
+ tests/test_connect_four.py  |   1 -
+ tests/test_decisions.py     |  26 ++++
+ tests/test_docs.py          |  28 ++++
+ 35 files changed, 1658 insertions(+), 516 deletions(-)
+
+diff --git a/.github/workflows/tests.yml b/.github/workflows/tests.yml
+index 9642e48..7cb04d5 100644
+--- a/.github/workflows/tests.yml
++++ b/.github/workflows/tests.yml
+@@ -1,5 +1,7 @@
+ name: Run tests
++
+ on: [push]
++
+ jobs:
+   run:
+     runs-on: ${{ matrix.os }}
+@@ -8,15 +10,22 @@ jobs:
+         os: [ubuntu-latest, windows-latest, macos-latest]
+         python-version: ["3.10", "3.11", "3.12", "3.13"]
+     steps:
+-    - uses: actions/checkout@master
+-    - name: Setup Python
+-      uses: actions/setup-python@master
+-      with:
+-        python-version: ${{ matrix.python-version }}
+-    - name: Install packages
+-      run: |
+-        pip install pytest
+-        pip install ruff
+-        pip install -e .
+-    - name: Run tests
+-      run: python -m pytest
++      - uses: actions/checkout@v4
++      - name: Setup Python
++        uses: actions/setup-python@v5
++        with:
++          python-version: ${{ matrix.python-version }}
++      - name: Install packages
++        run: python -m pip install -e ".[dev,docs]"
++      - name: Compile sources
++        run: python -m compileall pyjev examples docs
++      - name: Run tests
++        run: python -m pytest
++      - name: Lint
++        run: ruff check .
++      - name: Build documentation
++        run: python docs/make.py html
++      - name: Build package
++        run: python -m build
++      - name: Check distributions
++        run: twine check dist/*
+diff --git a/README.md b/README.md
+index 0df87ce..9b4a7ff 100644
+--- a/README.md
++++ b/README.md
+@@ -1,264 +1,68 @@
+ # pyjev
+
+-Reusable, confidence-aware [Jev](https://docs.typesafe.ai/introduction) decisions for Python and the shell.
++**Confidence-aware Jev decisions for Python, shell, CI, and automation.**
+
+-`pyjev` is a thin convenience layer over TypeSafe's official `typesafe-sdk`. TypeSafe owns HTTP transport, retries, API semantics, and SDK models; pyjev adds reusable named decisions, credential ergonomics, output safety, and a small CLI.
++`pyjev` is a thin operational layer over TypeSafe's official `typesafe-sdk`. It
++preserves Jev probabilities, confidence, and response metadata while adding
++reusable named decisions, shell-safe output, credential ergonomics, local
++validation, request inspection, and confidence gates.
+
+ ## Install
+
+ ```bash
+-pip install -e .
+-# development
+-pip install -e '.[dev]'
++pip install pyjev
++# or: uv tool install pyjev
+ ```
+
+-For a published release, install the package from PyPI or use `uv tool install pyjev`.
+-
+-## Authentication
+-
+-Credential lookup has this precedence:
+-
+-1. explicit Python `api_key=...`;
+-2. `TYPESAFE_API_KEY`;
+-3. the operating-system keyring;
+-4. `~/.config/pyjev/credentials` (or `$XDG_CONFIG_HOME/pyjev/credentials`).
+-
+-For local use, `pyjev auth set` first tries the operating-system keyring. If no usable
+-keyring backend is available, interactive use can fall back to
+-`~/.config/pyjev/credentials` after an explicit warning. The fallback is plaintext
+-and should be readable only by your user account. Restrictive file permissions do not
+-make it encrypted or equivalent to a keyring.
+-
+-Use the environment variable in CI and ephemeral environments:
+-
+-```bash
+-export TYPESAFE_API_KEY='...'
+-```
+-
+-Local authentication commands:
+-
+-```bash
+-pyjev auth set
+-pyjev auth status
+-pyjev auth delete
+-```
+-
+-Storage can be selected explicitly:
+-
+-```bash
+-pyjev auth set --storage keyring
+-pyjev auth set --storage file
+-```
+-
+-`pyjev auth set --api-key SECRET` is retained for automation, but may expose the
+-secret in shell history. Use `--storage file` only when the plaintext tradeoff is
+-acceptable. API keys must never be stored in project `.pyjev.toml` decision files;
+-the optional plaintext fallback is a separate user-level credential file.
+-
+-## CLI
+-
+-### Primitive decisions
+-
+-Noul evaluates a yes/no probability:
++For a development checkout:
+
+ ```bash
+-pyjev ask "Does this customer request a refund?" \
+-  --state "Please return my money."
++pip install -e '.[dev,docs]'
+ ```
+
+-Choice preserves the selected label, confidence, and full probability distribution:
++## A first decision
+
+ ```bash
+ pyjev choice "Where should this ticket go?" \
+   --state "Stripe checkout fails" \
+   --option billing="Payments and refunds" \
+   --option engineering="Technical failures" \
+-  --option sales="Purchasing questions"
+-```
+-
+-Score accepts 2–10 ordered levels:
+-
+-```bash
+-pyjev score "How urgent is this?" \
+-  --state "Production is down" \
+-  --level "Can wait" \
+-  --level "Normal" \
+-  --level "Urgent" \
+-  --level "Critical"
+-```
+-
+-State can come from `--state`, `--state-file`, or stdin. Add `--state-json` to decode it as JSON. Use `--json` for structured output or `--value` for only the selected value. These options cannot be combined.
+-
+-### Confidence gates
+-
+-Choice and Score support `--min-confidence`:
+-
+-```bash
+-if TEAM="$(cat ticket.txt | pyjev choice "Route this ticket" \
+-  --option billing --option engineering --option sales \
+-  --min-confidence 0.85 --value)"; then
+-  route_to "$TEAM"
+-else
+-  case "$?" in
+-    3) human_review ;;
+-    *) echo "pyjev failed" >&2; exit 1 ;;
+-  esac
+-fi
+-```
+-
+-The gate is evaluated before successful output. A failed `--value` gate emits an empty stdout and a concise stderr message. With `--json`, a failed gate emits an explicit envelope containing `gate.passed`, `minimum_confidence`, `confidence`, and the full `result`.
+-
+-Noul has a probability of true rather than a Choice/Score confidence, so `--min-confidence` is not supported for Noul decisions.
+-
+-### Exit codes
+-
+-| Exit | Meaning                                                                                             |
+-| ---: | --------------------------------------------------------------------------------------------------- |
+-|    0 | Successful result and any confidence gate passed                                                    |
+-|    1 | Runtime failure: credentials, keyring, credential-file, TypeSafe API, network, or configuration I/O |
+-|    2 | CLI usage or local argument validation error                                                        |
+-|    3 | Valid Choice/Score result obtained, but confidence gate failed                                      |
+-
+-Expected TypeSafe failures are concise and do not print tracebacks by default.
+-
+-## Reusable named decisions
+-
+-Create `.pyjev.toml` in a project:
+-
+-```toml
+-[decision.ticket-route]
+-type = "choice"
+-question = "Which team should handle this support request?"
+-model = "jev-latest"
+-
+-[decision.ticket-route.options]
+-billing = "Billing, invoice, payment, or refund issue"
+-engineering = "Technical problem or product bug"
+-sales = "Purchasing, pricing, or procurement question"
+-other = "None of the above"
+-
+-[decision.urgency]
+-type = "score"
+-question = "How urgent is this?"
+-levels = ["can wait", "normal", "urgent", "critical"]
+-
+-[decision.refund-request]
+-type = "noul"
+-question = "Does the customer request a refund?"
+-true = "The customer wants money returned."
+-false = "The customer does not request money returned."
+-```
+-
+-Named decisions are read-only declarations. They support Noul, Choice, Score, and an optional per-decision model. Unknown fields and invalid cardinalities are rejected before any API request.
+-
+-Configuration precedence is:
+-
+-1. explicit Python `config=` or CLI `--config PATH`;
+-2. `PYJEV_CONFIG`;
+-3. the nearest `.pyjev.toml` in the current directory or a parent directory.
+-
+-Use the management commands to inspect declarations:
+-
+-```bash
+-pyjev decision list
+-pyjev decision list --json
+-pyjev decision show ticket-route --json
+-pyjev decision validate
+-```
+-
+-Run a named decision from the shell:
+-
+-```bash
+-echo "Stripe webhooks keep failing" |
+-  pyjev decide ticket-route --min-confidence 0.85 --json
+-```
+-
+-The command supports the same state, model, config, output, and confidence options as primitive Choice/Score commands.
+-
+-## Python API
+-
+-```python
+-from pyjev import Jev
+-
+-with Jev() as jev:
+-    result = jev.decide(
+-        "ticket-route",
+-        state="Stripe webhooks keep failing",
+-    )
+-
+-if result.confidence >= 0.85:
+-    route(result.value)
+-```
+-
+-A short-lived top-level convenience function is also available:
+-
+-```python
+-from pyjev import decide
+-
+-result = decide(
+-    "ticket-route",
+-    "Stripe checkout fails",
+-    config="ops/.pyjev.toml",
+-    model="jev-latest",  # explicit override wins over the TOML model
+-)
++  --option sales="Purchasing questions" \
++  --json
+ ```
+
+-Direct primitive methods remain available:
+-
+ ```python
+ from pyjev import Jev
+
+ with Jev() as jev:
+-    choice = jev.choice(
+-        "Which team should handle this?",
+-        state="Stripe checkout crashes.",
+-        choices={
+-            "billing": "Payments and refunds",
+-            "engineering": "Technical failures",
+-            "sales": "Purchasing questions",
+-        },
+-    )
+-    score = jev.score(
+-        "How urgent is this?",
+-        state="Production is down.",
+-        levels=["Can wait", "Normal", "Urgent", "Critical"],
++    result = jev.choice(
++        "Where should this ticket go?",
++        state="Stripe checkout fails",
++        choices={"billing": "Payments", "engineering": "Technical", "sales": "Purchasing"},
+     )
++print(result.value, result.confidence, result.probabilities)
+ ```
+
+-`ChoiceResult` and `ScoreResult` preserve `value`, `confidence`, all probabilities, model, usage, raw answer data, and `request_id`. `NoulResult.value` is the raw probability of true and is not converted to a boolean.
++## What pyjev adds
+
+-For several heterogeneous questions, use `jev.run(...)` to send one mixed request through the SDK.
++- direct Noul, Choice, and Score operations with uncertainty preserved;
++- reusable `.pyjev.toml` decisions and mixed-question bundles;
++- offline validation and request compilation;
++- confidence-gated shell automation and stable exit codes;
++- keyring, environment, and explicit plaintext-file credential support;
++- request IDs, usage, raw metadata, and structured JSON for debugging.
+
+-## Connect Four tactical-proof example
++The official `typesafe-sdk` remains responsible for transport, retries, API
++models, authentication at the HTTP layer, and API error semantics. pyjev does
++not invent probabilities or confidence calculations.
+
+-`examples/connect_four.py` keeps exact Connect Four mechanics and short bounded tactical proofs in Python. In addition to immediate wins and blocks, it checks whether an opponent reply creates a fork with no legal tactical escape. Proven losing candidates are removed before Jev is called.
+-
+-This is deliberately **not** a general Connect Four search engine: Python does not assign positional scores or run minimax for strategic evaluation. When multiple tactically admissible moves remain, Jev still makes the strategic judgment. The observed bad move was an action-space problem, not merely low confidence: a model cannot avoid a proven loss if the application offers it as a choice.
+-
+-Run the playable demo with a configured API key:
+-
+-```bash
+-python examples/connect_four.py
+-python examples/connect_four.py --strategy aggressive
+-python examples/connect_four.py --debug
+-python examples/connect_four.py --debug --trace connect-four.jsonl
+-```
+-
+-`--debug` prints deterministic board facts, candidate keep/reject explanations, forcing proof branches, and the exact structured request and Jev response metadata for real calls. `--trace PATH` appends one JSONL record per completed turn; records contain no API credentials. `--self-play` runs the same player-relative tactical filter for Jev-X versus Jev-O.
+-
+-## Versioning and development
+-Versions are derived from Git tags with `setuptools-scm`; a tagged `v0.1.0` checkout builds as `0.1.0`.
+-
+-```bash
+-python -m compileall pyjev
+-pytest
+-ruff check .
+-python -m build
+-twine check dist/*
+-```
++## Learn more
+
+-No live API key is required for the unit tests. CI tests Python 3.10–3.14, builds wheel and sdist artifacts, checks package metadata, and smoke-tests an installed wheel.
++- [Full documentation](docs/index.md)
++- [Runnable examples](examples/README.md)
++- [TypeSafe Jev documentation](https://docs.typesafe.ai/)
++- [Issues](https://github.com/ledgerwerk/pyjev/issues)
+
+ ## License
+
+-Apache-2.0.
++Apache-2.0
+diff --git a/docs/api/client.md b/docs/api/client.md
+new file mode 100644
+index 0000000..c5de331
+--- /dev/null
++++ b/docs/api/client.md
+@@ -0,0 +1,6 @@
++# Client
++
++```{automodule} pyjev.client
++:members:
++:show-inheritance:
++```
+diff --git a/docs/api/index.md b/docs/api/index.md
+new file mode 100644
+index 0000000..3845330
+--- /dev/null
++++ b/docs/api/index.md
+@@ -0,0 +1,11 @@
++# API reference
++
++The guide pages explain concepts and workflows. These pages expose selected public
++signatures through Sphinx autodoc.
++
++```{toctree}
++:maxdepth: 1
++
++client
++results
++```
+diff --git a/docs/api/results.md b/docs/api/results.md
+new file mode 100644
+index 0000000..d5e3ad3
+--- /dev/null
++++ b/docs/api/results.md
+@@ -0,0 +1,6 @@
++# Result types
++
++```{automodule} pyjev.results
++:members:
++:show-inheritance:
++```
+diff --git a/docs/authentication.md b/docs/authentication.md
+new file mode 100644
+index 0000000..aecf01c
+--- /dev/null
++++ b/docs/authentication.md
+@@ -0,0 +1,30 @@
++# Authentication
++
++Credential lookup order is:
++
++1. explicit Python `api_key=`;
++2. `TYPESAFE_API_KEY`;
++3. the OS keyring;
++4. a user-level plaintext fallback file.
++
++## CLI management
++
++```bash
++pyjev auth set
++pyjev auth set --storage keyring
++pyjev auth set --storage file
++pyjev auth status
++pyjev auth delete
++```
++
++Interactive entry hides the key. `--api-key SECRET` can leak into shell history, so use
++it only when that tradeoff is acceptable. Deleting persisted credentials does not unset
++an active `TYPESAFE_API_KEY` environment variable.
++
++:::{warning}
++`--storage file` stores the key as plaintext in the user's configuration directory.
++Restrictive permissions are helpful but do not make the key encrypted.
++:::
++
++Project `.pyjev.toml` files must never contain API keys. Decision compilation and docs
++builds do not read credentials or contact the Jev API.
+diff --git a/docs/changelog.md b/docs/changelog.md
+new file mode 100644
+index 0000000..b727c30
+--- /dev/null
++++ b/docs/changelog.md
+@@ -0,0 +1,4 @@
++# Changelog
++
++This page is generated from project release records by releaseledger. Do not edit it
++manually; regenerate it through the release workflow.
+diff --git a/docs/cli.md b/docs/cli.md
+new file mode 100644
+index 0000000..efb709c
+--- /dev/null
++++ b/docs/cli.md
+@@ -0,0 +1,71 @@
++# CLI
++
++The CLI is designed for shell composition and stable automation.
++
++## Input sources
++
++Decision commands accept state from `--state`, `--state-file`, or stdin. `--state` and
++`--state-file` are mutually exclusive. Add `--state-json` to decode the selected source
++as JSON.
++
++## Output modes
++
++- Default output is compact human-readable output.
++- `--json` emits structured metadata.
++- `--value` emits only the selected value.
++
++`--json` and `--value` cannot be combined.
++
++## Commands
++
++Primitive commands are `ask`/`noul`, `choice`, and `score`. Named decisions use `decide`.
++Management commands include `decision list`, `decision show`, `decision validate`, and
++`decision compile`. `auth set`, `auth status`, and `auth delete` manage credentials.
++`run` is the raw mixed-question escape hatch; `models` lists SDK models.
++
++## Inspection
++
++```bash
++pyjev decision list --json
++pyjev decision show ticket-route --json
++pyjev decision validate
++pyjev decision compile ticket-route --state "Stripe checkout fails"
++```
++
++Compilation is offline and emits JSON by default. It never includes credentials.
++
++## Confidence gates
++
++Choice and Score support `--min-confidence`. A valid result below the invocation threshold
++exits with code 3. With `--value`, failed gates emit no actionable stdout. With `--json`,
++the result is wrapped with gate details. Noul exposes probability of true rather than the
++Choice/Score confidence signal, so Noul has no confidence gate.
++
++## Exit codes
++
++| Exit | Meaning                                                   |
++| ---: | --------------------------------------------------------- |
++|    0 | Successful result and any gate passed                     |
++|    1 | Runtime, credential, API, network, or I/O failure         |
++|    2 | Usage or local validation error                           |
++|    3 | Valid Choice/Score result, but the confidence gate failed |
++
++Keep these codes stable in scripts.
++
++## Shell composition
++
++```bash
++if TEAM="$(cat ticket.txt | pyjev choice "Route this ticket" \
++  --option billing --option engineering --option sales \
++  --min-confidence 0.85 --value)"; then
++  route_to "$TEAM"
++else
++  case "$?" in
++    3) human_review ;;
++    *) exit 1 ;;
++  esac
++fi
++```
++
++A failed gate means Jev returned a valid result but the caller's policy did not permit
++automated use; it does not mean that the model was universally untrustworthy.
+diff --git a/docs/comparisons.md b/docs/comparisons.md
+new file mode 100644
+index 0000000..7c50427
+--- /dev/null
++++ b/docs/comparisons.md
+@@ -0,0 +1,19 @@
++# Comparisons
++
++## Three layers
++
++- `typesafe-sdk`: the official low-level Python SDK for TypeSafe models, transport,
++  retries, and API errors.
++- `pyjev`: an operational wrapper with result preservation, named `.pyjev.toml`
++  decisions, CLI behavior, credentials, validation, compilation, and confidence gates.
++- Other higher-level interfaces: may optimize for application-model or Pydantic ergonomics.
++
++## Why not use the SDK directly?
++
++Use `typesafe-sdk` directly when you want maximum control and do not need named decisions,
++pyjev credential ergonomics, the shell CLI, confidence-gate exit semantics, or pyjev result
++wrappers. Use pyjev when those operational features make decisions easier to declare,
++inspect, validate, execute, gate, trace, and reuse.
++
++pyjev is not a decorator framework, does not require Pydantic, and does not replace the
++official SDK's transport or probabilistic semantics.
+diff --git a/docs/concepts.md b/docs/concepts.md
+new file mode 100644
+index 0000000..9538222
+--- /dev/null
++++ b/docs/concepts.md
+@@ -0,0 +1,58 @@
++# Concepts
++
++pyjev exposes a small operational model:
++
++```text
++state + typed question -> Jev -> structured answer
++```
++
++The SDK supplies the transport and Jev semantics. pyjev adds ergonomic calls,
++reusable specifications, local validation, CLI behavior, credentials, and traceable
++result wrappers.
++
++## Noul
++
++Noul asks for a yes/no probability. `NoulResult.value` is the probability of true.
++pyjev does not silently convert it to `bool`, and Noul does not use the Choice/Score
++`confidence` field. Choose an application threshold explicitly if your action needs one.
++
++## Choice
++
++Choice selects one member of a closed set. `ChoiceResult` contains the selected label,
++confidence, and the full probability distribution. Criteria can be dynamic:
++
++```python
++choices = currently_legal_actions()
++result = jev.choice("Which action is best among these?", state=state, choices=choices)
++```
++
++Runtime choices do not need to be static project configuration.
++
++## Score
++
++Score evaluates state against ordered levels. The numeric score is the
++**probability-weighted position over the ordered levels**. `ScoreResult` also includes
++the legend and probability distribution; scores may be fractional.
++
++## Exact logic versus judgment
++
++Keep deterministic facts in ordinary code: legal moves, schema validation, permissions,
++and proven tactical exclusions. Use Jev where several valid alternatives require judgment.
++
++> Do not ask a judgment model to rediscover exact facts that ordinary code can compute reliably.
++
++The Connect Four example computes exact legal and tactically losing moves in Python, then
++asks Jev to choose among the remaining genuine alternatives. This boundary generalizes to
++production systems: deterministic constraints first, ambiguous judgment second.
++
++## Product boundary
++
++```text
++application / shell / CI
++        pyjev: decisions, confidence-aware output, CLI, credentials, validation
++        typesafe-sdk: models, transport, retries, API errors
++        Jev API
++```
++
++pyjev wraps and preserves TypeSafe/Jev semantics; it does not invent probabilities or
++confidence calculations.
+diff --git a/docs/conf.py b/docs/conf.py
+index 7d7c478..1998540 100644
+--- a/docs/conf.py
++++ b/docs/conf.py
+@@ -1,101 +1,53 @@
+-# -- Path setup --------------------------------------------------------------
++"""Sphinx configuration for pyjev."""
++
++from __future__ import annotations
+
+-# If extensions (or modules to document with autodoc) are in another directory,
+-# add these directories to sys.path here. If the directory is relative to the
+-# documentation root, use os.path.abspath to make it absolute, like shown here.
+-#
+-import os
+ import sys
++from pathlib import Path
++
++ROOT = Path(__file__).resolve().parents[1]
++sys.path.insert(0, str(ROOT))
+
+-sys.path.insert(0, os.path.abspath(".."))
+-sys.path.insert(0, os.path.abspath("../pyjev"))
+-# -- Project information -----------------------------------------------------
+-# https://www.sphinx-doc.org/en/master/usage/configuration.html#project-information
++import pyjev  # noqa: E402
+
+ project = "pyjev"
+-copyright = "2026, Holger Nahrstaedt"
+ author = "Holger Nahrstaedt"
++copyright = "2026, Holger Nahrstaedt"
++version = pyjev.__version__
++release = pyjev.__version__
++root_doc = "index"
+
+-# -- General configuration ---------------------------------------------------
+-
+-# Add any Sphinx extension module names here, as strings. They can be
+-# extensions coming with Sphinx (named 'sphinx.ext.*') or your custom
+-# ones.
+ extensions = [
++    "myst_parser",
+     "sphinx.ext.autodoc",
+     "sphinx.ext.doctest",
+     "sphinx.ext.intersphinx",
+     "sphinx.ext.napoleon",
+     "sphinx.ext.viewcode",
+-    "myst_parser",
+ ]
+-
+-# All authored Sphinx pages are MyST Markdown.
+-source_suffix = {
+-    ".md": "markdown",
+-}
+-
+-# Required for readable Markdown-native admonitions.
++source_suffix = {".md": "markdown"}
+ myst_enable_extensions = ["colon_fence"]
+-
+-# Current documentation contains headings through H4.
+ myst_heading_anchors = 4
+
+-# Napoleon settings for NumPy-style docstrings
+ napoleon_google_docstring = False
+ napoleon_numpy_docstring = True
+ napoleon_include_init_with_doc = True
+ napoleon_include_private_with_doc = False
+ napoleon_include_special_with_doc = True
+-napoleon_use_admonition_for_examples = False
+-napoleon_use_admonition_for_notes = False
+-napoleon_use_admonition_for_references = False
+-napoleon_use_ivar = False
+ napoleon_use_param = True
+ napoleon_use_rtype = True
+-napoleon_preprocess_types = False
+-napoleon_type_aliases = None
+-napoleon_attr_annotations = True
+
+-# Autodoc settings
+ autodoc_default_options = {
+     "members": True,
+-    "undoc-members": True,
+     "show-inheritance": True,
+     "member-order": "bysource",
+ }
++autodoc_typehints = "description"
++autodoc_preserve_defaults = True
+
+-# Add any paths that contain templates here, relative to this directory.
+ templates_path = ["_templates"]
+-
+-# List of patterns, relative to source directory, that match files and
+-# directories to ignore when looking for source files.
+-# This pattern also affects html_static_path and html_extra_path.
+ exclude_patterns = ["_build", "Thumbs.db", ".DS_Store", "README.md"]
+
+-
+-# -- Options for HTML output -------------------------------------------------
+-
+-# The theme to use for HTML and HTML Help pages.  See the documentation for
+-# a list of builtin themes.
+-#
+-# html_theme = 'furo'
+-
+ html_theme = "sphinx_rtd_theme"
+-
+-html_theme_options = {
+-    "navigation_depth": 4,
+-    "titles_only": False,
+-}
+-
+-# Add any paths that contain custom static files (such as style sheets) here,
+-# relative to this directory. They are copied after the builtin static files,
+-# so a file named "default.css" will overwrite the builtin "default.css".
+-# html_static_path = ['_static']
+-
+-# Set up intersphinx maps
+-intersphinx_mapping = {
+-    "python": ("https://docs.python.org/3", None),
+-    "numpy": ("https://numpy.org/doc/stable", None),
+-    "PIL": ("https://pillow.readthedocs.io/en/stable", None),
+-}
++html_theme_options = {"navigation_depth": 4, "titles_only": False}
++intersphinx_mapping = {"python": ("https://docs.python.org/3", None)}
+diff --git a/docs/confidence.md b/docs/confidence.md
+new file mode 100644
+index 0000000..82bd2a9
+--- /dev/null
++++ b/docs/confidence.md
+@@ -0,0 +1,35 @@
++# Confidence and policy
++
++Choice and Score expose several distinct signals:
++
++- the selected option or score value;
++- the selected option's probability or score distribution;
++- the complete probability distribution;
++- `confidence`, as supplied by Jev;
++- the application's decision to act.
++
++:::{important}
++`ChoiceResult.confidence` is a separate signal from the selected option's probability.
++Do not describe it as the probability that the answer is correct.
++:::
++
++## Gates
++
++```bash
++pyjev choice "Route this ticket" \
++  --option billing --option engineering --option sales \
++  --min-confidence 0.85 --value
++```
++
++A failed gate exits 3. With `--value`, stdout is empty so an unsafe value cannot be
++accidentally consumed by a pipeline. Use the exit code to route to human review.
++
++## Thresholds belong to the application
++
++A threshold is invocation policy, not a universal Jev recommendation. Different actions
++have different consequences. Keep thresholds at the call site until a deliberate policy
++and outcome abstraction exists. pyjev does not add `min_confidence` to `.pyjev.toml` in
++this pass, and it does not invent a default threshold.
++
++Noul returns a probability of true and does not expose the Choice/Score confidence gate.
++Choose and document an application policy explicitly when using Noul.
+diff --git a/docs/debugging.md b/docs/debugging.md
+new file mode 100644
+index 0000000..ac75dc7
+--- /dev/null
++++ b/docs/debugging.md
+@@ -0,0 +1,26 @@
++# Debugging
++
++Result wrappers preserve the data needed to investigate a decision:
++
++- `request_id` identifies the API request;
++- `model` records the selected model;
++- `usage` records SDK usage metadata;
++- `raw` retains the answer payload;
++- `--json` exposes these fields for tooling.
++
++Use named-decision inspection without an API call:
++
++```bash
++pyjev decision show ticket-route --json
++pyjev decision validate
++pyjev decision compile ticket-route --state "Stripe checkout fails"
++```
++
++Compilation is the primary request-debugging tool because it shows normalized state,
++question criteria, and model selection without credentials or a network call. For the
++Connect Four example, `--debug` prints deterministic candidate facts and request metadata;
++`--trace PATH` writes credential-free JSONL records.
++
++When debugging a low-confidence result, inspect the complete probability distribution
++rather than treating confidence as a correctness guarantee. Also verify that deterministic
++application constraints removed invalid choices before asking Jev to judge among the rest.
+diff --git a/docs/development.md b/docs/development.md
+new file mode 100644
+index 0000000..ad74b40
+--- /dev/null
++++ b/docs/development.md
+@@ -0,0 +1,27 @@
++# Development
++
++Install contributor dependencies:
++
++```bash
++pip install -e '.[dev,docs]'
++```
++
++Run the offline quality checks:
++
++```bash
++python -m compileall pyjev examples docs
++pytest
++ruff check .
++python docs/make.py html
++python docs/make.py linkcheck
++python -m build
++twine check dist/*
++```
++
++Tests use fake or injected SDK clients and do not require a live API key. Versions are
++derived from Git tags by `setuptools-scm`; `_version.py` is generated in build contexts.
++Release history is owned by releaseledger and rendered into the changelog page.
++
++Documentation examples that would call Jev are illustrative code blocks. Executable
++checks should use pure parsing/validation or injected fakes; documentation builds must
++never call the live API.
+diff --git a/docs/examples.md b/docs/examples.md
+new file mode 100644
+index 0000000..8708d8a
+--- /dev/null
++++ b/docs/examples.md
+@@ -0,0 +1,27 @@
++# Examples
++
++Runnable source lives under `examples/` in the repository. Each example keeps
++application policy visible instead of merely printing a model answer.
++
++## Emergency snack
++
++`emergency_snack.py` demonstrates a direct Choice call, structured state, a closed action
++set, the full distribution, and an application-level confidence policy.
++
++## Haunted CI
++
++`haunted_ci.py` demonstrates a named Score decision, an ordered rubric, fractional scores,
++a legend, and confidence-aware action.
++
++## Connect Four
++
++`connect_four.py` demonstrates deterministic preprocessing, dynamic Choice criteria,
++request inspection, and credential-free JSONL tracing. Python computes exact legal moves
++and removes moves proven to lose under the example's bounded tactical rules. Jev is called
++only when multiple tactically admissible actions remain.
++
++> Deterministic constraints belong in ordinary code; ambiguous judgment among valid
++> alternatives belongs in Jev.
++
++Read the full source for the playable demo rather than copying its tactical helpers into
++an application without understanding their scope.
+diff --git a/docs/getting-started.md b/docs/getting-started.md
+new file mode 100644
+index 0000000..1d337fc
+--- /dev/null
++++ b/docs/getting-started.md
+@@ -0,0 +1,92 @@
++# Getting started
++
++This page takes a new user from installation to a first decision in about five minutes.
++
++## Install
++
++```bash
++pip install pyjev
++uv tool install pyjev
++```
++
++For a checkout, install contributor and documentation dependencies separately:
++
++```bash
++pip install -e '.[dev,docs]'
++```
++
++## Authenticate
++
++For an interactive local setup:
++
++```bash
++pyjev auth set
++pyjev auth status
++```
++
++For CI, use an environment variable:
++
++```bash
++export TYPESAFE_API_KEY='...'
++```
++
++:::{warning}
++The file fallback is plaintext. Restrictive permissions reduce exposure but do not
++encrypt the credential.
++:::
++
++## First CLI decision
++
++Choice returns a selected label, confidence, and the complete distribution:
++
++```bash
++pyjev choice "Where should this ticket go?" \
++  --state "Stripe checkout fails" \
++  --option billing="Payments and refunds" \
++  --option engineering="Technical failures" \
++  --option sales="Purchasing questions" \
++  --json
++```
++
++`--json` is intended for programs and preserves all result metadata.
++
++## First Python decision
++
++```python
++from pyjev import Jev
++
++with Jev() as jev:
++    result = jev.choice(
++        "Where should this ticket go?",
++        state="Stripe checkout fails",
++        choices={"billing": "Payments", "engineering": "Technical", "sales": "Purchasing"},
++    )
++print(result.value, result.confidence, result.probabilities)
++```
++
++## First named decision
++
++Create `.pyjev.toml`:
++
++```toml
++[pyjev]
++schema = 1
++
++[decision.ticket-route]
++type = "choice"
++question = "Which team should handle this support request?"
++
++[decision.ticket-route.options]
++billing = "Billing, invoice, payment, or refund issue"
++engineering = "Technical problem or product bug"
++sales = "Purchasing, pricing, or procurement question"
++```
++
++Then run it from the project directory:
++
++```bash
++echo "Stripe webhooks fail" | pyjev decide ticket-route --json
++```
++
++Continue with [Named decisions](named-decisions.md), [Confidence](confidence.md),
++[Python API](python-api.md), and [CLI](cli.md).
+diff --git a/docs/index.md b/docs/index.md
+new file mode 100644
+index 0000000..5c08591
+--- /dev/null
++++ b/docs/index.md
+@@ -0,0 +1,68 @@
++# pyjev
++
++**Confidence-aware Jev decisions for Python, shell, CI, and automation.**
++
++pyjev is a thin operational layer over TypeSafe's official `typesafe-sdk`. It
++preserves Jev probabilities, confidence, and response metadata while adding
++reusable named decisions, shell-safe output, local validation, request
++inspection, and credential ergonomics.
++
++## CLI
++
++```bash
++pyjev choice "Where should this ticket go?" \
++  --state "Stripe checkout fails" \
++  --option billing="Payments and refunds" \
++  --option engineering="Technical failures" \
++  --option sales="Purchasing questions"
++```
++
++## Python
++
++```python
++from pyjev import Jev
++
++with Jev() as jev:
++    result = jev.choice(
++        "Where should this ticket go?",
++        state="Stripe checkout fails",
++        choices={"billing": "Payments", "engineering": "Technical", "sales": "Purchasing"},
++    )
++
++print(result.value)
++print(result.confidence)
++print(result.probabilities)
++```
++
++## Why pyjev?
++
++- Preserve probabilities, confidence, and response metadata.
++- Define reusable decisions in `.pyjev.toml`.
++- Use the same decision from Python or the shell.
++- Gate automation explicitly at the invocation boundary.
++- Validate mistakes before spending an API request.
++- Retain request IDs and usage metadata for debugging.
++
++Start with [Getting started](getting-started.md), then read [Concepts](concepts.md).
++See [Confidence](confidence.md) for safe automation, [Named decisions](named-decisions.md)
++for reusable specifications, [CLI](cli.md) for shell usage, and [Python API](python-api.md)
++for code usage.
++
++```{toctree}
++:maxdepth: 2
++:hidden:
++
++getting-started
++concepts
++python-api
++cli
++named-decisions
++confidence
++authentication
++debugging
++examples
++comparisons
++api/index
++development
++changelog
++```
+diff --git a/docs/make.py b/docs/make.py
+index 5e2a591..230001b 100755
+--- a/docs/make.py
++++ b/docs/make.py
+@@ -1,89 +1,58 @@
+-#!/usr/bin/env python
+-"""
+-Script to build documentation for pykokoro.
++#!/usr/bin/env python3
++"""Build pyjev documentation with the active Python environment."""
+
+-This script builds the Sphinx documentation for the pykokoro package.
+-It can be run using:
+-    python docs/make.py [option]
++from __future__ import annotations
+
+-Options:
+-    clean   - clean the build directory
+-    html    - build HTML documentation
+-    dirhtml - build HTML documentation with directory structure
+-    all     - build all documentation formats
+-    help    - show help message
+-"""
+-
+-import os
+ import shutil
+ import subprocess
+ import sys
++from pathlib import Path
++
++ROOT = Path(__file__).resolve().parents[1]
++DOCS = ROOT / "docs"
++BUILD = DOCS / "_build"
++TARGETS = {"html", "dirhtml", "text", "linkcheck", "doctest"}
++
++
++def run(builder: str) -> int:
++    output = BUILD / builder
++    command = [
++        sys.executable,
++        "-m",
++        "sphinx",
++        "-W",
++        "--keep-going",
++        "-b",
++        builder,
++        str(DOCS),
++        str(output),
++    ]
++    print(f"Building {builder} documentation...")
++    subprocess.run(command, cwd=ROOT, check=True)
++    print(f"Build finished. Documentation is in {output}")
++    return 0
+
+
+-def main():
+-    """Run the script."""
+-    sphinx_build = "sphinx-build"
+-
+-    # Determine if we're being run from docs/ or from project root
+-    script_dir = os.path.dirname(os.path.abspath(__file__))
+-    if os.path.basename(script_dir) == "docs":
+-        # Running from docs directory
+-        build_dir = "_build"
+-        source_dir = "."
+-    else:
+-        # Running from project root
+-        build_dir = os.path.join("docs", "_build")
+-        source_dir = "docs"
+-
+-    target = "html" if len(sys.argv) < 2 else sys.argv[1]
+-
+-    if target == "clean":
+-        if os.path.exists(build_dir):
+-            print(f"Cleaning {build_dir}...")
+-            shutil.rmtree(build_dir)
+-        return 0
+-
++def main(argv: list[str] | None = None) -> int:
++    target = (argv or sys.argv[1:] or ["html"])[0]
+     if target == "help":
+         print(__doc__)
++        print("Targets: clean, html, dirhtml, text, linkcheck, doctest, all")
++        return 0
++    if target == "clean":
++        if BUILD.exists():
++            shutil.rmtree(BUILD)
+         return 0
+-
+-    if not os.path.exists(build_dir):
+-        os.makedirs(build_dir)
+-
+-    # Set of valid targets
+-    valid_targets = {
+-        "html",
+-        "dirhtml",
+-        "latex",
+-        "latexpdf",
+-        "text",
+-        "man",
+-        "changes",
+-        "linkcheck",
+-        "doctest",
+-        "all",
+-    }
+-
+-    if target not in valid_targets:
+-        print(f"Unknown target: {target}")
+-        print("Use 'help' target for help")
+-        return 1
+-
+     if target == "all":
+-        # Build all formats
+-        for fmt in ["html", "dirhtml", "latex"]:
+-            cmd = [sphinx_build, "-b", fmt, source_dir, os.path.join(build_dir, fmt)]
+-            print(f"Building {fmt} documentation...")
+-            subprocess.run(cmd, check=True)
+-    else:
+-        # Build specific format
+-        cmd = [sphinx_build, "-b", target, source_dir, os.path.join(build_dir, target)]
+-        print(f"Building {target} documentation...")
+-        subprocess.run(cmd, check=True)
+-
+-    print(f"Build finished. Documentation is in {os.path.join(build_dir, target)}")
+-    return 0
++        for builder in ("html", "text", "linkcheck"):
++            run(builder)
++        return 0
++    if target not in TARGETS:
++        print(f"Unknown target: {target}", file=sys.stderr)
++        print("Use 'help' target for help", file=sys.stderr)
++        return 1
++    return run(target)
+
+
+ if __name__ == "__main__":
+-    sys.exit(main())
++    raise SystemExit(main())
+diff --git a/docs/named-decisions.md b/docs/named-decisions.md
+new file mode 100644
+index 0000000..689baf6
+--- /dev/null
++++ b/docs/named-decisions.md
+@@ -0,0 +1,82 @@
++# Named decisions
++
++`.pyjev.toml` is a version-controlled decision specification, not a secret store.
++Keep credentials in the environment, keyring, or user-level credential file.
++
++## Schema
++
++Canonical files declare schema 1:
++
++```toml
++[pyjev]
++schema = 1
++```
++
++A missing `[pyjev]` table remains accepted as legacy implicit schema 1. Unknown schema
++fields, non-integer values, and unsupported schema numbers fail during local validation.
++No migration machinery is implied by the marker.
++
++## Primitive declarations
++
++```toml
++[decision.ticket-route]
++type = "choice"
++question = "Which team should handle this?"
++model = "jev-latest"
++
++[decision.ticket-route.options]
++billing = "Billing or refunds"
++engineering = "Technical problem"
++sales = "Purchasing question"
++
++[decision.urgency]
++type = "score"
++question = "How urgent is this?"
++levels = ["Can wait", "Normal", "Urgent", "Critical"]
++```
++
++Noul uses `true` and `false` criteria. Choice requires 2–255 options; Score requires
++2–10 ordered levels. Unknown fields and invalid criteria are rejected before API access.
++
++## Bundles
++
++A bundle asks several independent typed questions about one state in one SDK request:
++
++```toml
++[decision.ticket-triage]
++type = "bundle"
++
++[decision.ticket-triage.questions.refund]
++type = "noul"
++question = "Does the customer request a refund?"
++
++[decision.ticket-triage.questions.route]
++type = "choice"
++question = "Which team should handle this?"
++
++[decision.ticket-triage.questions.route.options]
++billing = "Billing issue"
++engineering = "Technical issue"
++sales = "Purchase question"
++```
++
++Child keys become answer identifiers. Nested bundles and child `model` fields are not
++allowed initially because one `system_one()` request uses one model. Model precedence is
++explicit call model, then bundle model, then the client/SDK default.
++
++Bundle results preserve every child result's probabilities and confidence, plus shared
++model, usage, raw response, and request ID. Bundles have no aggregate confidence policy;
++`--value` and `--min-confidence` are rejected.
++
++## Discovery and inspection
++
++Configuration precedence is explicit `config=`/`--config`, then `PYJEV_CONFIG`, then the
++nearest `.pyjev.toml` in the current directory or a parent. Use `decision validate` to
++check all declarations without a network call and `decision compile` to inspect a
++normalized request for a particular state.
++
++## When not to use named decisions
++
++Do not put a decision in `.pyjev.toml` when its criteria are inherently dynamic at runtime.
++For example, Connect Four legal actions depend on the current board; build those choices
++in Python after deterministic filtering.
+diff --git a/docs/python-api.md b/docs/python-api.md
+new file mode 100644
+index 0000000..4aece6f
+--- /dev/null
++++ b/docs/python-api.md
+@@ -0,0 +1,83 @@
++# Python API
++
++## Creating a client
++
++```python
++from pyjev import Jev
++
++with Jev(model="jev-latest") as jev:
++    result = jev.choice("Route this ticket", state=ticket, choices=choices)
++```
++
++`Jev` delegates transport, retries, API semantics, and models to `typesafe-sdk`.
++The context manager closes clients created by `Jev`.
++
++## Primitive operations
++
++- `jev.noul(...)` and its `jev.ask(...)` alias return `NoulResult`.
++- `jev.choice(...)` accepts a mapping of labels to criteria or a sequence of labels.
++- `jev.score(...)` accepts 2–10 ordered levels.
++
++All validation happens before the SDK call. Results preserve uncertainty instead of
++collapsing to a scalar convenience value.
++
++## Named decisions
++
++```python
++result = jev.decide("ticket-route", state=ticket, config="ops/.pyjev.toml")
++```
++
++Explicit call model overrides the decision model. Configuration discovery and schema
++rules are described in [Named decisions](named-decisions.md).
++
++## Mixed questions
++
++`jev.run(state=..., questions=...)` sends several SDK question objects in one request.
++Named bundles provide the same pattern from `.pyjev.toml` and return `BundleResult`.
++
++## Compiling offline
++
++```python
++from pyjev import compile_decision
++
++compiled = compile_decision("ticket-route", state="Stripe checkout fails")
++print(compiled.to_dict())
++```
++
++Compilation resolves and validates configuration without creating a client or reading
++credentials. It is useful for review, debugging, and agent tooling.
++
++## Injected clients
++
++```python
++from typesafe_sdk import TypeSafeClient
++from pyjev import Jev
++
++client = TypeSafeClient(...)
++jev = Jev(client=client)
++# use jev
++jev.close()  # does not close caller-owned client
++```
++
++An injected client is caller-owned. Constructor options such as `api_key`, `model`, and
++`timeout` cannot be combined with it.
++
++## Result objects
++
++Use `.value`, `.confidence`, `.probabilities`, and `.legend` as applicable. Every result
++also preserves model, usage, raw answer data, and request ID. `NoulResult.value` remains
++the raw probability of true.
++
++## Async API
++
++When the installed official SDK supports native async transport, `AsyncJev` exposes the
++same primitive, named-decision, bundle, validation, model-precedence, and result semantics:
++
++```python
++from pyjev import AsyncJev
++
++async with AsyncJev() as jev:
++    result = await jev.choice("Route this ticket", state=ticket, choices=choices)
++```
++
++It uses `AsyncTypeSafeClient` directly and does not hide synchronous work in a thread pool.
+diff --git a/examples/.pyjev.toml b/examples/.pyjev.toml
+index 52b4fc9..694dd6b 100644
+--- a/examples/.pyjev.toml
++++ b/examples/.pyjev.toml
+@@ -1,3 +1,6 @@
++[pyjev]
++schema = 1
++
+ [decision.emergency-snack]
+ type = "choice"
+ question = "Which snack should the on-call engineer bring to the emergency room?"
+diff --git a/examples/connect_four.py b/examples/connect_four.py
+index ed3e426..d9bcdeb 100644
+--- a/examples/connect_four.py
++++ b/examples/connect_four.py
+@@ -1,6 +1,5 @@
+ """Play Connect Four against Jev with exact bounded tactical proofs."""
+
+-
+ import argparse
+ import json
+ from dataclasses import dataclass, field
+@@ -69,9 +68,7 @@ class TacticalSelection:
+             "candidates": [column + 1 for column in self.candidates],
+             "reason": self.reason,
+             "constraints": list(self.constraints),
+-            "rejected": {
+-                str(column + 1): list(reasons) for column, reasons in sorted(self.rejected.items())
+-            },
++            "rejected": {str(column + 1): list(reasons) for column, reasons in sorted(self.rejected.items())},
+         }
+
+
+@@ -330,8 +327,7 @@ def scan_tactics(board: list[list[str]], piece: str, opponent: str) -> TacticalS
+
+     analyses = {column: analyze_move(board, column, piece, opponent) for column in legal}
+     forcing_proofs = {
+-        column: opponent_forcing_replies(board, column, piece=piece, opponent=opponent)
+-        for column in legal
++        column: opponent_forcing_replies(board, column, piece=piece, opponent=opponent) for column in legal
+     }
+     immediate_wins = winning_columns(board, piece)
+     if immediate_wins:
+@@ -358,16 +354,10 @@ def scan_tactics(board: list[list[str]], piece: str, opponent: str) -> TacticalS
+         constraints.append("avoid-immediate-loss")
+
+     forcing_wins = [
+-        column
+-        for column in safe
+-        if move_forces_win_next_turn(board, column, piece=piece, opponent=opponent)
++        column for column in safe if move_forces_win_next_turn(board, column, piece=piece, opponent=opponent)
+     ]
+     if forcing_wins:
+-        rejected = {
+-            column: ["not-a-proven-forcing-win"]
+-            for column in safe
+-            if column not in forcing_wins
+-        }
++        rejected = {column: ["not-a-proven-forcing-win"] for column in safe if column not in forcing_wins}
+         return TacticalSelection(
+             legal,
+             forcing_wins,
+@@ -448,10 +438,7 @@ def build_jev_state(
+     """Build exact tactical state supplied to Jev."""
+     selection = selection or scan_tactics(board, piece, opponent)
+     legal = selection.legal_columns
+-    analyses = {
+-        str(column + 1): selection.analyses[column]
+-        for column in legal
+-    }
++    analyses = {str(column + 1): selection.analyses[column] for column in legal}
+     active_name = player.name if player else ("Jev" if piece == JEV_PIECE else "Jev-X")
+     other_name = opponent_player.name if opponent_player else ("human" if opponent == HUMAN else "Jev-O")
+     strategy = player.strategy if player else "balanced"
+@@ -478,9 +465,7 @@ def build_jev_state(
+             "constraints_applied": list(selection.constraints),
+             "candidate_reason": candidate_reason,
+             "candidate_columns": [column + 1 for column in candidate_columns],
+-            "rejected_columns": {
+-                str(column + 1): reasons for column, reasons in sorted(selection.rejected.items())
+-            },
++            "rejected_columns": {str(column + 1): reasons for column, reasons in sorted(selection.rejected.items())},
+         },
+         "move_analysis": analyses,
+         "rules": [
+@@ -617,6 +602,7 @@ def winning_columns_from_selection(selection: TacticalSelection, side: str) -> l
+         return _analysis_winning_columns(selection, "wins_now")
+     return _analysis_winning_columns(selection, "allows_immediate_loss")
+
++
+ def _analysis_winning_columns(selection: TacticalSelection, key: str) -> list[int]:
+     """Internal compatibility helper for compact terminal output."""
+     if key == "wins_now":
+diff --git a/pyjev/__init__.py b/pyjev/__init__.py
+index 5fc66cf..242bd28 100644
+--- a/pyjev/__init__.py
++++ b/pyjev/__init__.py
+@@ -7,8 +7,9 @@ from importlib.metadata import version as package_version
+ from pathlib import Path
+ from typing import Any
+
+-from .client import Jev
+-from .results import ChoiceResult, NoulResult, ScoreResult
++from .client import AsyncJev, Jev
++from .compile import CompiledDecision, compile_decision
++from .results import BundleResult, ChoiceResult, NoulResult, ScoreResult
+
+ try:
+     from ._version import __version__
+@@ -26,17 +27,21 @@ def decide(
+     config: str | Path | None = None,
+     model: str | None = None,
+     api_key: str | None = None,
+-) -> NoulResult | ChoiceResult | ScoreResult:
++) -> NoulResult | ChoiceResult | ScoreResult | BundleResult:
+     """Evaluate a named decision using a short-lived convenience client."""
+     with Jev(api_key=api_key, model=model) as jev:
+         return jev.decide(name, state=state, config=config, model=model)
+
+
+ __all__ = [
++    "BundleResult",
++    "CompiledDecision",
++    "AsyncJev",
+     "ChoiceResult",
+     "Jev",
+     "NoulResult",
+     "ScoreResult",
++    "compile_decision",
+     "__version__",
+     "decide",
+ ]
+diff --git a/pyjev/cli.py b/pyjev/cli.py
+index 6d41ba0..3e07859 100644
+--- a/pyjev/cli.py
++++ b/pyjev/cli.py
+@@ -21,6 +21,7 @@ from typesafe_sdk import (
+
+ from . import __version__
+ from .client import Jev
++from .compile import compile_decision
+ from .credentials import (
+     ENV_NAME,
+     CredentialError,
+@@ -31,14 +32,15 @@ from .credentials import (
+     set_file_api_key,
+ )
+ from .decisions import (
++    BundleDecision,
+     DecisionConfigError,
+     NoulDecision,
+     decision_to_dict,
+-    find_config,
++    load_config,
+     load_decision,
+     load_decisions,
+ )
+-from .results import ChoiceResult, NoulResult, ScoreResult
++from .results import BundleResult, ChoiceResult, NoulResult, ScoreResult
+
+ EXIT_OK = 0
+ EXIT_RUNTIME_ERROR = 1
+@@ -46,7 +48,7 @@ EXIT_USAGE = 2
+ EXIT_CONFIDENCE = 3
+
+ T = TypeVar("T")
+-Result = NoulResult | ChoiceResult | ScoreResult
++Result = BundleResult | NoulResult | ChoiceResult | ScoreResult
+
+ app = typer.Typer(
+     no_args_is_help=True,
+@@ -124,6 +126,13 @@ def _emit_result(result: Result, *, json_output: bool, value_only: bool) -> None
+     if json_output:
+         _print_json(result.to_dict())
+         return
++    if isinstance(result, BundleResult):
++        if value_only:
++            raise typer.BadParameter("--value is not valid for bundle decisions.")
++        for name, answer in result.answers.items():
++            typer.echo(f"[{name}]")
++            _emit_result(answer, json_output=False, value_only=False)
++        return
+     if value_only:
+         typer.echo(result.value)
+         return
+@@ -367,8 +376,12 @@ def decide(
+         declaration = load_decision(name, config)
+     except DecisionConfigError as exc:
+         raise _parse_decision_error(exc) from exc
+-    if isinstance(declaration, NoulDecision) and min_confidence is not None:
++    if isinstance(declaration, (NoulDecision, BundleDecision)) and min_confidence is not None:
++        if isinstance(declaration, BundleDecision):
++            raise typer.BadParameter("--min-confidence is not valid for bundle decisions.")
+         raise typer.BadParameter("--min-confidence is only valid for named Choice and Score decisions.")
++    if isinstance(declaration, BundleDecision) and value_only:
++        raise typer.BadParameter("--value is not valid for bundle decisions.")
+     value = _state_value(state, state_file, state_json)
+     result = _named_decision_result(name, state=value, config=str(config) if config else None, model=model)
+     _emit_gated_result(
+@@ -512,19 +525,48 @@ def decision_show(
+     else:
+         typer.echo(f"name={decision.name}")
+         typer.echo(f"type={type(decision).__name__.removesuffix('Decision').lower()}")
+-        typer.echo(f"question={decision.question}")
++        if isinstance(decision, BundleDecision):
++            typer.echo(f"questions={','.join(decision.questions)}")
++        else:
++            typer.echo(f"question={decision.question}")
+
+
+ @decision_app.command("validate")
+ def decision_validate(
+     config: Path | None = typer.Option(None, "--config", help="Path to a .pyjev.toml file."),
++    json_output: bool = typer.Option(False, "--json", help="Emit JSON."),
+ ) -> None:
+     try:
+-        path = find_config(config)
+-        decisions = load_decisions(config)
++        loaded = load_config(config)
++    except DecisionConfigError as exc:
++        raise _parse_decision_error(exc) from exc
++    if json_output:
++        _print_json(
++            {
++                "config": str(loaded.path),
++                "schema": loaded.schema,
++                "decisions": [decision_to_dict(decision) for decision in loaded.decisions.values()],
++            }
++        )
++        return
++    typer.echo(f"Valid {loaded.path}: schema {loaded.schema}; {len(loaded.decisions)} decisions")
++
++
++@decision_app.command("compile")
++def decision_compile(
++    name: str = typer.Argument(..., help="Name declared in .pyjev.toml."),
++    state: str | None = typer.Option(None, "--state", "-s", help="State text."),
++    state_file: Path | None = typer.Option(None, "--state-file", help="Read state from a file."),
++    state_json: bool = typer.Option(False, "--state-json", help="Decode the state as JSON."),
++    model: str | None = typer.Option(None, "--model", help="Override the decision's model."),
++    config: Path | None = typer.Option(None, "--config", help="Path to a .pyjev.toml file."),
++) -> None:
++    value = _state_value(state, state_file, state_json)
++    try:
++        compiled = compile_decision(name, state=value, config=config, model=model)
+     except DecisionConfigError as exc:
+         raise _parse_decision_error(exc) from exc
+-    typer.echo(f"Valid {path}: {len(decisions)} decisions")
++    _print_json(compiled.to_dict())
+
+
+ @app.command("run")
+diff --git a/pyjev/client.py b/pyjev/client.py
+index 0995753..0574ffc 100644
+--- a/pyjev/client.py
++++ b/pyjev/client.py
+@@ -7,10 +7,12 @@ from pathlib import Path
+ from types import TracebackType
+ from typing import Any
+
+-from typesafe_sdk import Choice, Noul, NoulCriteria, Question, Score, TypeSafeClient
++from typesafe_sdk import AsyncTypeSafeClient, Question, TypeSafeClient
+
++from .compile import build_choice, build_decision_questions, build_noul, build_score
+ from .credentials import get_api_key
+-from .results import ChoiceResult, NoulResult, ScoreResult
++from .decisions import BundleDecision, ChoiceDecision, NoulDecision, ScoreDecision, load_decision
++from .results import BundleResult, ChoiceResult, NoulResult, PrimitiveResult, ScoreResult
+
+
+ def _request_id(response: Any) -> str | None:
+@@ -22,35 +24,54 @@ def _request_id(response: Any) -> str | None:
+     return value if isinstance(value, str) else None
+
+
+-def _validate_choice_criteria(choices: Mapping[str, Any | None] | Sequence[str]) -> dict[str, Any | None]:
+-    if isinstance(choices, Mapping):
+-        criteria = dict(choices)
+-    else:
+-        labels = list(choices)
+-        if len(labels) != len(set(labels)):
+-            raise ValueError("choice sequence contains duplicate labels")
+-        criteria = {name: None for name in labels}
++def _usage(response: Any) -> dict[str, Any]:
++    return response.usage.model_dump(mode="json")
+
+-    if not 2 <= len(criteria) <= 255:
+-        raise ValueError("choice requires between 2 and 255 options")
+-    for label in criteria:
+-        if not isinstance(label, str) or not label.strip():
+-            raise ValueError("choice labels must be nonempty strings")
+-    return criteria
+
+-
+-def _validate_score_levels(levels: Sequence[Any]) -> list[Any]:
+-    values = list(levels)
+-    if not 2 <= len(values) <= 10:
+-        raise ValueError("score requires between 2 and 10 levels")
+-    return values
++def _primitive_result(
++    response: Any,
++    name: str,
++    decision: NoulDecision | ChoiceDecision | ScoreDecision,
++) -> PrimitiveResult:
++    request_id = _request_id(response)
++    if isinstance(decision, NoulDecision):
++        answer = response.nouls[name]
++        return NoulResult(
++            value=answer.noul,
++            model=response.model,
++            usage=_usage(response),
++            raw=answer.model_dump(mode="json"),
++            request_id=request_id,
++        )
++    if isinstance(decision, ChoiceDecision):
++        answer = response.choices[name]
++        return ChoiceResult(
++            value=answer.choice,
++            confidence=answer.confidence,
++            probabilities=dict(answer.probabilities),
++            model=response.model,
++            usage=_usage(response),
++            raw=answer.model_dump(mode="json"),
++            request_id=request_id,
++        )
++    answer = response.scores[name]
++    return ScoreResult(
++        value=answer.score,
++        confidence=answer.confidence,
++        probabilities=dict(answer.probabilities),
++        legend=dict(answer.legend),
++        model=response.model,
++        usage=_usage(response),
++        raw=answer.model_dump(mode="json"),
++        request_id=request_id,
++    )
+
+
+ class Jev:
+     """Convenience client for common Jev decisions.
+
+     `Jev` deliberately delegates transport, retries, validation, and API semantics to
+-    `typesafe-sdk`.
++    `typesafe-sdk`. It only adds ergonomic request construction and result wrappers.
+     """
+
+     def __init__(
+@@ -61,21 +82,21 @@ class Jev:
+         timeout: float | None = None,
+         client: TypeSafeClient | None = None,
+     ) -> None:
++        """Create a client or wrap a caller-owned SDK client.
++
++        An injected client cannot be combined with `api_key`, `model`, or `timeout`,
++        and is never closed by :meth:`close`.
++        """
+         if client is not None and any(value is not None for value in (api_key, model, timeout)):
+             raise ValueError("api_key, model, and timeout cannot be used with an injected client")
+         self._owns_client = client is None
+         self._client = (
+-            client
+-            if client is not None
+-            else TypeSafeClient(
+-                api_key=get_api_key(api_key),
+-                model=model,
+-                timeout=timeout,
+-            )
++            client if client is not None else TypeSafeClient(api_key=get_api_key(api_key), model=model, timeout=timeout)
+         )
+
+     @property
+     def client(self) -> TypeSafeClient:
++        """Return the underlying SDK client."""
+         return self._client
+
+     def ask(
+@@ -99,23 +120,13 @@ class Jev:
+         false: Any | None = None,
+         model: str | None = None,
+     ) -> NoulResult:
+-        criteria: NoulCriteria | None = None
+-        if true is not None or false is not None:
+-            criteria = {"true": true, "false": false}
+-
++        """Evaluate a yes/no question and preserve the probability of true."""
+         response = self._client.system_one(
+             state=state,
+-            questions={"answer": Noul(instructions=question, criteria=criteria)},
++            questions={"answer": build_noul(question, true=true, false=false)},
+             model=model,
+         )
+-        answer = response.nouls["answer"]
+-        return NoulResult(
+-            value=answer.noul,
+-            model=response.model,
+-            usage=response.usage.model_dump(mode="json"),
+-            raw=answer.model_dump(mode="json"),
+-            request_id=_request_id(response),
+-        )
++        return _primitive_result(response, "answer", NoulDecision("answer", str(question), true, false, model))  # type: ignore[arg-type]
+
+     def choice(
+         self,
+@@ -125,22 +136,14 @@ class Jev:
+         choices: Mapping[str, Any | None] | Sequence[str],
+         model: str | None = None,
+     ) -> ChoiceResult:
+-        criteria = _validate_choice_criteria(choices)
++        """Evaluate a closed-set Choice question."""
++        criteria = dict(choices) if isinstance(choices, Mapping) else {label: None for label in choices}
+         response = self._client.system_one(
+             state=state,
+-            questions={"answer": Choice(instructions=question, criteria=criteria)},
++            questions={"answer": build_choice(question, criteria)},
+             model=model,
+         )
+-        answer = response.choices["answer"]
+-        return ChoiceResult(
+-            value=answer.choice,
+-            confidence=answer.confidence,
+-            probabilities=dict(answer.probabilities),
+-            model=response.model,
+-            usage=response.usage.model_dump(mode="json"),
+-            raw=answer.model_dump(mode="json"),
+-            request_id=_request_id(response),
+-        )
++        return _primitive_result(response, "answer", ChoiceDecision("answer", str(question), criteria))
+
+     def score(
+         self,
+@@ -150,23 +153,14 @@ class Jev:
+         levels: Sequence[Any],
+         model: str | None = None,
+     ) -> ScoreResult:
+-        values = _validate_score_levels(levels)
++        """Evaluate state against an ordered Score rubric."""
++        values = list(levels)
+         response = self._client.system_one(
+             state=state,
+-            questions={"answer": Score(instructions=question, criteria=values)},
++            questions={"answer": build_score(question, values)},
+             model=model,
+         )
+-        answer = response.scores["answer"]
+-        return ScoreResult(
+-            value=answer.score,
+-            confidence=answer.confidence,
+-            probabilities=dict(answer.probabilities),
+-            legend=dict(answer.legend),
+-            model=response.model,
+-            usage=response.usage.model_dump(mode="json"),
+-            raw=answer.model_dump(mode="json"),
+-            request_id=_request_id(response),
+-        )
++        return _primitive_result(response, "answer", ScoreDecision("answer", str(question), tuple(values)))  # type: ignore[arg-type]
+
+     def decide(
+         self,
+@@ -175,12 +169,12 @@ class Jev:
+         state: Any,
+         config: str | Path | None = None,
+         model: str | None = None,
+-    ) -> NoulResult | ChoiceResult | ScoreResult:
+-        """Evaluate a validated named decision from a TOML configuration."""
+-        from .decisions import ChoiceDecision, NoulDecision, ScoreDecision, load_decision
+-
++    ) -> NoulResult | ChoiceResult | ScoreResult | BundleResult:
++        """Evaluate a named primitive or bundle decision from TOML."""
+         decision = load_decision(name, config)
+         effective_model = model if model is not None else decision.model
++        if isinstance(decision, BundleDecision):
++            return self._bundle(decision, state=state, model=effective_model)
+         if isinstance(decision, NoulDecision):
+             return self.noul(
+                 decision.question,
+@@ -191,9 +185,19 @@ class Jev:
+             )
+         if isinstance(decision, ChoiceDecision):
+             return self.choice(decision.question, state=state, choices=decision.options, model=effective_model)
+-        if isinstance(decision, ScoreDecision):
+-            return self.score(decision.question, state=state, levels=decision.levels, model=effective_model)
+-        raise TypeError(f"Unsupported decision type: {type(decision).__name__}")
++        return self.score(decision.question, state=state, levels=decision.levels, model=effective_model)
++
++    def _bundle(self, decision: BundleDecision, *, state: Any, model: str | None) -> BundleResult:
++        questions = build_decision_questions(decision)
++        response = self._client.system_one(state=state, questions=questions, model=model)
++        answers = {name: _primitive_result(response, name, child) for name, child in decision.questions.items()}
++        return BundleResult(
++            answers=answers,
++            model=response.model,
++            usage=_usage(response),
++            raw=response.model_dump(mode="json"),
++            request_id=_request_id(response),
++        )
+
+     def run(
+         self,
+@@ -202,15 +206,17 @@ class Jev:
+         questions: Mapping[str, Question],
+         model: str | None = None,
+     ) -> dict[str, Any]:
+-        """Evaluate several independent typed questions in one request."""
++        """Evaluate several independent SDK questions in one request."""
+         response = self._client.system_one(state=state, questions=questions, model=model)
+         return response.model_dump(mode="json")
+
+     def models(self) -> list[dict[str, Any]]:
++        """List models using the underlying SDK client."""
+         response = self._client.models.list()
+         return [model.model_dump(mode="json") for model in response.models]
+
+     def close(self) -> None:
++        """Close only a client created by this instance."""
+         if self._owns_client:
+             self._client.close()
+
+@@ -224,3 +230,164 @@ class Jev:
+         traceback: TracebackType | None,
+     ) -> None:
+         self.close()
++
++
++class AsyncJev:
++    """Native async counterpart to :class:`Jev` using the SDK async client."""
++
++    def __init__(
++        self,
++        *,
++        api_key: str | None = None,
++        model: str | None = None,
++        timeout: float | None = None,
++        client: AsyncTypeSafeClient | None = None,
++    ) -> None:
++        """Create an async client without simulating async over synchronous I/O."""
++        if client is not None and any(value is not None for value in (api_key, model, timeout)):
++            raise ValueError("api_key, model, and timeout cannot be used with an injected client")
++        self._owns_client = client is None
++        self._client = (
++            client
++            if client is not None
++            else AsyncTypeSafeClient(api_key=get_api_key(api_key), model=model, timeout=timeout)
++        )
++
++    @property
++    def client(self) -> AsyncTypeSafeClient:
++        """Return the underlying native async SDK client."""
++        return self._client
++
++    async def ask(
++        self,
++        question: Any,
++        *,
++        state: Any,
++        true: Any | None = None,
++        false: Any | None = None,
++        model: str | None = None,
++    ) -> NoulResult:
++        """Async alias for :meth:`noul`."""
++        return await self.noul(question, state=state, true=true, false=false, model=model)
++
++    async def noul(
++        self,
++        question: Any,
++        *,
++        state: Any,
++        true: Any | None = None,
++        false: Any | None = None,
++        model: str | None = None,
++    ) -> NoulResult:
++        """Evaluate Noul through the native async SDK client."""
++        response = await self._client.system_one(
++            state=state,
++            questions={"answer": build_noul(question, true=true, false=false)},
++            model=model,
++        )
++        return _primitive_result(response, "answer", NoulDecision("answer", str(question), true, false, model))
++
++    async def choice(
++        self,
++        question: Any,
++        *,
++        state: Any,
++        choices: Mapping[str, Any | None] | Sequence[str],
++        model: str | None = None,
++    ) -> ChoiceResult:
++        """Evaluate Choice through the native async SDK client."""
++        criteria = dict(choices) if isinstance(choices, Mapping) else {label: None for label in choices}
++        response = await self._client.system_one(
++            state=state,
++            questions={"answer": build_choice(question, criteria)},
++            model=model,
++        )
++        return _primitive_result(response, "answer", ChoiceDecision("answer", str(question), criteria))
++
++    async def score(
++        self,
++        question: Any,
++        *,
++        state: Any,
++        levels: Sequence[Any],
++        model: str | None = None,
++    ) -> ScoreResult:
++        """Evaluate Score through the native async SDK client."""
++        values = list(levels)
++        response = await self._client.system_one(
++            state=state,
++            questions={"answer": build_score(question, values)},
++            model=model,
++        )
++        return _primitive_result(response, "answer", ScoreDecision("answer", str(question), tuple(values)))
++
++    async def decide(
++        self,
++        name: str,
++        *,
++        state: Any,
++        config: str | Path | None = None,
++        model: str | None = None,
++    ) -> NoulResult | ChoiceResult | ScoreResult | BundleResult:
++        """Evaluate a named primitive or bundle asynchronously."""
++        decision = load_decision(name, config)
++        effective_model = model if model is not None else decision.model
++        if isinstance(decision, BundleDecision):
++            questions = build_decision_questions(decision)
++            response = await self._client.system_one(state=state, questions=questions, model=effective_model)
++            answers = {name: _primitive_result(response, name, child) for name, child in decision.questions.items()}
++            return BundleResult(
++                answers=answers,
++                model=response.model,
++                usage=_usage(response),
++                raw=response.model_dump(mode="json"),
++                request_id=_request_id(response),
++            )
++        if isinstance(decision, NoulDecision):
++            return await self.noul(
++                decision.question,
++                state=state,
++                true=decision.true,
++                false=decision.false,
++                model=effective_model,
++            )
++        if isinstance(decision, ChoiceDecision):
++            return await self.choice(
++                decision.question,
++                state=state,
++                choices=decision.options,
++                model=effective_model,
++            )
++        return await self.score(decision.question, state=state, levels=decision.levels, model=effective_model)
++
++    async def run(
++        self,
++        *,
++        state: Any,
++        questions: Mapping[str, Question],
++        model: str | None = None,
++    ) -> dict[str, Any]:
++        """Evaluate several SDK questions asynchronously in one request."""
++        response = await self._client.system_one(state=state, questions=questions, model=model)
++        return response.model_dump(mode="json")
++
++    async def models(self) -> list[dict[str, Any]]:
++        """List models through the native async SDK client."""
++        response = await self._client.models.list()
++        return [model.model_dump(mode="json") for model in response.models]
++
++    async def close(self) -> None:
++        """Close only a client created by this instance."""
++        if self._owns_client:
++            await self._client.aclose()
++
++    async def __aenter__(self) -> AsyncJev:
++        return self
++
++    async def __aexit__(
++        self,
++        exc_type: type[BaseException] | None,
++        exc_value: BaseException | None,
++        traceback: TracebackType | None,
++    ) -> None:
++        await self.close()
+diff --git a/pyjev/compile.py b/pyjev/compile.py
+new file mode 100644
+index 0000000..b6ce0c1
+--- /dev/null
++++ b/pyjev/compile.py
+@@ -0,0 +1,144 @@
++"""Offline compilation of named pyjev decisions."""
++
++from __future__ import annotations
++
++from collections.abc import Mapping, Sequence
++from dataclasses import dataclass
++from pathlib import Path
++from typing import Any
++
++from typesafe_sdk import Choice, Noul, NoulCriteria, Question, Score
++
++from .decisions import BundleDecision, ChoiceDecision, Decision, NoulDecision, ScoreDecision, load_decision
++
++
++def validate_choice_criteria(choices: Mapping[str, Any | None] | Sequence[str]) -> dict[str, Any | None]:
++    """Normalize and validate Choice criteria before an SDK request."""
++    if isinstance(choices, Mapping):
++        criteria = dict(choices)
++    else:
++        labels = list(choices)
++        if len(labels) != len(set(labels)):
++            raise ValueError("choice sequence contains duplicate labels")
++        criteria = {name: None for name in labels}
++    if not 2 <= len(criteria) <= 255:
++        raise ValueError("choice requires between 2 and 255 options")
++    for label in criteria:
++        if not isinstance(label, str) or not label.strip():
++            raise ValueError("choice labels must be nonempty strings")
++    return criteria
++
++
++def validate_score_levels(levels: Sequence[Any]) -> list[Any]:
++    """Normalize and validate ordered Score levels before an SDK request."""
++    values = list(levels)
++    if not 2 <= len(values) <= 10:
++        raise ValueError("score requires between 2 and 10 levels")
++    return values
++
++
++def build_noul(question: Any, *, true: Any | None = None, false: Any | None = None) -> Noul:
++    """Build the official SDK Noul question used by live and compiled requests."""
++    criteria: NoulCriteria | None = None
++    if true is not None or false is not None:
++        criteria = {"true": true, "false": false}
++    return Noul(instructions=question, criteria=criteria)
++
++
++def build_choice(question: Any, choices: Mapping[str, Any | None] | Sequence[str]) -> Choice:
++    """Build the official SDK Choice question used by live and compiled requests."""
++    return Choice(instructions=question, criteria=validate_choice_criteria(choices))
++
++
++def build_score(question: Any, levels: Sequence[Any]) -> Score:
++    """Build the official SDK Score question used by live and compiled requests."""
++    return Score(instructions=question, criteria=validate_score_levels(levels))
++
++
++def build_question(decision: Decision) -> Question:
++    """Build the SDK question for a validated primitive decision declaration."""
++    if isinstance(decision, NoulDecision):
++        return build_noul(decision.question, true=decision.true, false=decision.false)
++    if isinstance(decision, ChoiceDecision):
++        return build_choice(decision.question, decision.options)
++    if isinstance(decision, ScoreDecision):
++        return build_score(decision.question, decision.levels)
++    raise TypeError(f"Unsupported decision type: {type(decision).__name__}")
++
++
++def build_decision_questions(decision: Decision) -> dict[str, Question]:
++    """Build all SDK questions for a primitive or bundle declaration."""
++    if isinstance(decision, BundleDecision):
++        return {name: build_question(child) for name, child in decision.questions.items()}
++    return {"answer": build_question(decision)}
++
++
++@dataclass(frozen=True, slots=True)
++class CompiledDecision:
++    """A credential-free, normalized request preview for a named decision."""
++
++    name: str
++    kind: str
++    state: Any
++    questions: dict[str, Question]
++    model: str | None
++    config_path: Path
++
++    def to_dict(self) -> dict[str, Any]:
++        """Return a deterministic JSON-compatible representation without secrets."""
++        return {
++            "decision": {
++                "name": self.name,
++                "type": self.kind,
++                "config": str(self.config_path),
++            },
++            "request": {
++                "state": self.state,
++                "questions": {name: question.model_dump(mode="json") for name, question in self.questions.items()},
++                "model": self.model,
++            },
++        }
++
++
++def compile_decision(
++    name: str,
++    *,
++    state: Any,
++    config: str | Path | None = None,
++    model: str | None = None,
++) -> CompiledDecision:
++    """Compile a named primitive decision without constructing a client or calling the API.
++
++    Parameters
++    ----------
++    name:
++        Name declared in `.pyjev.toml`.
++    state:
++        State that would be sent to Jev.
++    config:
++        Optional explicit decision configuration path.
++    model:
++        Optional model override. It wins over the declaration's model.
++
++    Returns
++    -------
++    CompiledDecision
++        Immutable normalized request preview.
++    """
++    decision = load_decision(name, config)
++    effective_model = model if model is not None else decision.model
++    kind = type(decision).__name__.removesuffix("Decision").lower()
++    # load_decision validates the complete file; compile deliberately never creates Jev.
++    path = Path(config).expanduser().resolve() if config is not None else None
++    if path is None:
++        from .decisions import find_config
++
++        path = find_config()
++    return CompiledDecision(
++        name=name,
++        kind=kind,
++        state=state,
++        questions=build_decision_questions(decision),
++        model=effective_model,
++        config_path=path,
++    )
+diff --git a/pyjev/decisions.py b/pyjev/decisions.py
+index 9c90c12..badb0cd 100644
+--- a/pyjev/decisions.py
++++ b/pyjev/decisions.py
+@@ -6,7 +6,7 @@ import json
+ import os
+ from dataclasses import dataclass
+ from pathlib import Path
+-from typing import Any
++from typing import Any, TypeAlias
+
+ try:  # Python 3.11+
+     import tomllib
+@@ -24,6 +24,8 @@ class DecisionConfigNotFound(DecisionConfigError):
+
+ @dataclass(frozen=True, slots=True)
+ class NoulDecision:
++    """A named yes/no probability declaration."""
++
+     name: str
+     question: str
+     true: Any | None = None
+@@ -33,6 +35,8 @@ class NoulDecision:
+
+ @dataclass(frozen=True, slots=True)
+ class ChoiceDecision:
++    """A named closed-set Choice declaration."""
++
+     name: str
+     question: str
+     options: dict[str, Any | None]
+@@ -41,13 +45,36 @@ class ChoiceDecision:
+
+ @dataclass(frozen=True, slots=True)
+ class ScoreDecision:
++    """A named ordered Score declaration."""
++
+     name: str
+     question: str
+     levels: tuple[Any, ...]
+     model: str | None = None
+
+
+-Decision = NoulDecision | ChoiceDecision | ScoreDecision
++PrimitiveDecision: TypeAlias = NoulDecision | ChoiceDecision | ScoreDecision
++
++
++@dataclass(frozen=True, slots=True)
++class BundleDecision:
++    """A named set of independent primitive questions sharing one state and model."""
++
++    name: str
++    questions: dict[str, PrimitiveDecision]
++    model: str | None = None
++
++
++Decision: TypeAlias = PrimitiveDecision | BundleDecision
++
++
++@dataclass(frozen=True, slots=True)
++class DecisionConfig:
++    """Validated decision configuration and its effective schema version."""
++
++    path: Path
++    schema: int
++    decisions: dict[str, Decision]
+
+
+ def find_config(
+@@ -123,25 +150,30 @@ def _check_fields(table: dict[str, Any], allowed: set[str], path: Path, name: st
+         raise _error(path, name, unknown[0], "unknown field")
+
+
+-def _parse_decision(name: str, raw: Any, path: Path) -> Decision:
+-    if not isinstance(name, str) or not name.strip():
+-        raise _error(path, name, "name", "must be a nonempty string")
+-    table = _require_table(raw, path, name, "decision")
++def _parse_primitive(name: str, table: dict[str, Any], path: Path, *, allow_model: bool = True) -> PrimitiveDecision:
+     kind = table.get("type")
+     if kind not in {"noul", "choice", "score"}:
+         raise _error(path, name, "type", "must be exactly noul, choice, or score")
++    if not allow_model and "model" in table:
++        raise _error(path, name, "model", "child model overrides are not allowed in a bundle")
+     question = _question(table, path, name)
+-    model = _model(table, path, name)
++    model = _model(table, path, name) if allow_model else None
+
+     if kind == "noul":
+-        _check_fields(table, {"type", "question", "true", "false", "model"}, path, name)
++        allowed = {"type", "question", "true", "false"}
++        if allow_model:
++            allowed.add("model")
++        _check_fields(table, allowed, path, name)
+         for field in ("true", "false"):
+             if field in table and not _json_compatible(table[field]):
+                 raise _error(path, name, field, "must be JSON-compatible")
+         return NoulDecision(name=name, question=question, true=table.get("true"), false=table.get("false"), model=model)
+
+     if kind == "choice":
+-        _check_fields(table, {"type", "question", "options", "model"}, path, name)
++        allowed = {"type", "question", "options"}
++        if allow_model:
++            allowed.add("model")
++        _check_fields(table, allowed, path, name)
+         options = table.get("options")
+         if not isinstance(options, dict):
+             raise _error(path, name, "options", "must be a TOML table")
+@@ -151,14 +183,15 @@ def _parse_decision(name: str, raw: Any, path: Path) -> Decision:
+         for label, description in options.items():
+             if not isinstance(label, str) or not label.strip():
+                 raise _error(path, name, "options", "labels must be nonempty strings")
+-            if label in parsed_options:
+-                raise _error(path, name, "options", f"duplicate label {label!r}")
+             if not _json_compatible(description):
+                 raise _error(path, name, f"options.{label}", "must be JSON-compatible")
+             parsed_options[label] = description
+         return ChoiceDecision(name=name, question=question, options=parsed_options, model=model)
+
+-    _check_fields(table, {"type", "question", "levels", "model"}, path, name)
++    allowed = {"type", "question", "levels"}
++    if allow_model:
++        allowed.add("model")
++    _check_fields(table, allowed, path, name)
+     levels = table.get("levels")
+     if not isinstance(levels, list):
+         raise _error(path, name, "levels", "must be an array")
+@@ -169,8 +202,44 @@ def _parse_decision(name: str, raw: Any, path: Path) -> Decision:
+     return ScoreDecision(name=name, question=question, levels=tuple(levels), model=model)
+
+
+-def load_decisions(config: str | Path | None = None) -> dict[str, Decision]:
+-    """Load and strictly validate every named decision in a config file."""
++def _parse_decision(name: str, raw: Any, path: Path) -> Decision:
++    if not isinstance(name, str) or not name.strip():
++        raise _error(path, name, "name", "must be a nonempty string")
++    table = _require_table(raw, path, name, "decision")
++    kind = table.get("type")
++    if kind == "bundle":
++        _check_fields(table, {"type", "questions", "model"}, path, name)
++        raw_questions = table.get("questions")
++        if not isinstance(raw_questions, dict) or not raw_questions:
++            raise _error(path, name, "questions", "must be a nonempty TOML table")
++        questions: dict[str, PrimitiveDecision] = {}
++        for question_name, raw_question in raw_questions.items():
++            if not isinstance(question_name, str) or not question_name.strip():
++                raise _error(path, name, "questions", "keys must be nonempty strings")
++            question_table = _require_table(raw_question, path, f"{name}.{question_name}", "question")
++            questions[question_name] = _parse_primitive(question_name, question_table, path, allow_model=False)
++        return BundleDecision(name=name, questions=questions, model=_model(table, path, name))
++    if kind not in {"noul", "choice", "score"}:
++        raise _error(path, name, "type", "must be exactly noul, choice, score, or bundle")
++    return _parse_primitive(name, table, path)
++
++
++def _schema(document: dict[str, Any], path: Path) -> int:
++    raw_metadata = document.get("pyjev")
++    if raw_metadata is None:
++        return 1
++    metadata = _require_table(raw_metadata, path, None, "pyjev")
++    _check_fields(metadata, {"schema"}, path, "pyjev")
++    value = metadata.get("schema", 1)
++    if isinstance(value, bool) or not isinstance(value, int):
++        raise _error(path, None, "pyjev.schema", "must be an integer")
++    if value != 1:
++        raise _error(path, None, "pyjev.schema", "unsupported schema; supported schemas: 1")
++    return value
++
++
++def load_config(config: str | Path | None = None) -> DecisionConfig:
++    """Load and strictly validate a complete decision configuration."""
+     path = find_config(config)
+     try:
+         with path.open("rb") as stream:
+@@ -179,7 +248,10 @@ def load_decisions(config: str | Path | None = None) -> dict[str, Decision]:
+         raise DecisionConfigError(f"Could not read decision config {path}: {exc}") from exc
+     except tomllib.TOMLDecodeError as exc:
+         raise DecisionConfigError(f"{path}: invalid TOML: {exc}") from exc
++    if not isinstance(document, dict):
++        raise DecisionConfigError(f"{path}: expected a TOML document")
+
++    schema = _schema(document, path)
+     raw_decisions = document.get("decision")
+     if not isinstance(raw_decisions, dict):
+         raise DecisionConfigError(f"{path}: decision: expected a TOML table")
+@@ -188,29 +260,35 @@ def load_decisions(config: str | Path | None = None) -> dict[str, Decision]:
+         if name in decisions:
+             raise _error(path, name, "name", "duplicate decision name")
+         decisions[name] = _parse_decision(name, raw, path)
+-    return decisions
++    return DecisionConfig(path=path, schema=schema, decisions=decisions)
++
++
++def load_decisions(config: str | Path | None = None) -> dict[str, Decision]:
++    """Load every named decision after validating the complete configuration."""
++    return load_config(config).decisions
+
+
+ def load_decision(name: str, config: str | Path | None = None) -> Decision:
+     """Load one named decision after validating the complete configuration."""
+     if not isinstance(name, str) or not name.strip():
+         raise DecisionConfigError("Decision name must be a nonempty string.")
+-    decisions = load_decisions(config)
++    loaded = load_config(config)
+     try:
+-        return decisions[name]
++        return loaded.decisions[name]
+     except KeyError as exc:
+-        path = find_config(config)
+-        raise DecisionConfigError(f"{path}: decision {name!r}: not found") from exc
++        raise DecisionConfigError(f"{loaded.path}: decision {name!r}: not found") from exc
+
+
+ def decision_to_dict(decision: Decision) -> dict[str, Any]:
+     """Return a JSON-serializable representation for CLI output."""
+-    if isinstance(decision, NoulDecision):
+-        result: dict[str, Any] = {
++    if isinstance(decision, BundleDecision):
++        result = {
+             "name": decision.name,
+-            "type": "noul",
+-            "question": decision.question,
++            "type": "bundle",
++            "questions": {name: decision_to_dict(question) for name, question in decision.questions.items()},
+         }
++    elif isinstance(decision, NoulDecision):
++        result = {"name": decision.name, "type": "noul", "question": decision.question}
+         if decision.true is not None:
+             result["true"] = decision.true
+         if decision.false is not None:
+diff --git a/pyjev/results.py b/pyjev/results.py
+index 4cfd6dc..aac7f43 100644
+--- a/pyjev/results.py
++++ b/pyjev/results.py
+@@ -3,11 +3,13 @@
+ from __future__ import annotations
+
+ from dataclasses import dataclass
+-from typing import Any
++from typing import Any, TypeAlias
+
+
+ @dataclass(frozen=True, slots=True)
+ class NoulResult:
++    """A Noul probability and response metadata."""
++
+     value: float
+     model: str
+     usage: dict[str, Any]
+@@ -15,11 +17,14 @@ class NoulResult:
+     request_id: str | None = None
+
+     def to_dict(self) -> dict[str, Any]:
++        """Return the raw answer with shared response metadata."""
+         return {**self.raw, "model": self.model, "usage": self.usage, "request_id": self.request_id}
+
+
+ @dataclass(frozen=True, slots=True)
+ class ChoiceResult:
++    """A selected Choice label, confidence, distribution, and metadata."""
++
+     value: str
+     confidence: float
+     probabilities: dict[str, float]
+@@ -29,11 +34,14 @@ class ChoiceResult:
+     request_id: str | None = None
+
+     def to_dict(self) -> dict[str, Any]:
++        """Return the raw answer with shared response metadata."""
+         return {**self.raw, "model": self.model, "usage": self.usage, "request_id": self.request_id}
+
+
+ @dataclass(frozen=True, slots=True)
+ class ScoreResult:
++    """A fractional Score, confidence, distribution, legend, and metadata."""
++
+     value: float
+     confidence: float
+     probabilities: dict[int, float]
+@@ -44,4 +52,29 @@ class ScoreResult:
+     request_id: str | None = None
+
+     def to_dict(self) -> dict[str, Any]:
++        """Return the raw answer with shared response metadata."""
+         return {**self.raw, "model": self.model, "usage": self.usage, "request_id": self.request_id}
++
++
++PrimitiveResult: TypeAlias = NoulResult | ChoiceResult | ScoreResult
++
++
++@dataclass(frozen=True, slots=True)
++class BundleResult:
++    """Uncertainty-preserving results for several typed questions in one request."""
++
++    answers: dict[str, PrimitiveResult]
++    model: str
++    usage: dict[str, Any]
++    raw: dict[str, Any]
++    request_id: str | None = None
++
++    def to_dict(self) -> dict[str, Any]:
++        """Return a stable JSON-compatible bundle envelope."""
++        return {
++            "answers": {name: answer.to_dict() for name, answer in self.answers.items()},
++            "model": self.model,
++            "usage": self.usage,
++            "raw": self.raw,
++            "request_id": self.request_id,
++        }
+diff --git a/pyproject.toml b/pyproject.toml
+index e693181..0dcd7d1 100644
+--- a/pyproject.toml
++++ b/pyproject.toml
+@@ -38,6 +38,11 @@ dev = [
+   "build>=1,<2",
+   "twine>=6,<7",
+ ]
++docs = [
++  "sphinx>=7,<9",
++  "myst-parser>=2,<5",
++  "sphinx-rtd-theme>=2,<4",
++]
+
+ [project.scripts]
+ pyjev = "pyjev.cli:app"
+@@ -46,7 +51,7 @@ pyjev = "pyjev.cli:app"
+ Homepage = "https://github.com/ledgerwerk/pyjev"
+ Repository = "https://github.com/ledgerwerk/pyjev"
+ Issues = "https://github.com/ledgerwerk/pyjev/issues"
+-Documentation = "https://docs.typesafe.ai/"
++"TypeSafe Jev Documentation" = "https://docs.typesafe.ai/"
+
+ [tool.setuptools.packages.find]
+ where = ["."]
+diff --git a/tests/test_async.py b/tests/test_async.py
+new file mode 100644
+index 0000000..e0dda45
+--- /dev/null
++++ b/tests/test_async.py
+@@ -0,0 +1,60 @@
++from __future__ import annotations
++
++import asyncio
++from types import SimpleNamespace
++
++from pyjev import AsyncJev
++
++
++class Dumpable(SimpleNamespace):
++    def model_dump(self, mode: str = "python"):
++        del mode
++        return dict(self.__dict__)
++
++
++class AsyncResponse:
++    model = "async-test"
++    request_id = "async-request"
++    usage = Dumpable(input_tokens=4, output_tokens=2)
++
++    def __init__(self):
++        self.nouls = {}
++        self.choices = {
++            "answer": Dumpable(
++                type="choice",
++                choice="yes",
++                confidence=0.9,
++                probabilities={"yes": 0.9, "no": 0.1},
++            )
++        }
++        self.scores = {}
++
++    def model_dump(self, mode: str = "python"):
++        del mode
++        return {"model": self.model}
++
++
++class AsyncClient:
++    def __init__(self):
++        self.calls = []
++        self.closed = False
++
++    async def system_one(self, *, state, questions, model=None):
++        self.calls.append((state, questions, model))
++        return AsyncResponse()
++
++    async def aclose(self):
++        self.closed = True
++
++
++def test_async_choice_uses_native_async_client():
++    async def run() -> None:
++        client = AsyncClient()
++        jev = AsyncJev(client=client)
++        result = await jev.choice("Choose", state="state", choices=["yes", "no"])
++        assert result.value == "yes"
++        assert len(client.calls) == 1
++        await jev.close()
++        assert client.closed is False
++
++    asyncio.run(run())
+diff --git a/tests/test_bundles.py b/tests/test_bundles.py
+new file mode 100644
+index 0000000..5b9c314
+--- /dev/null
++++ b/tests/test_bundles.py
+@@ -0,0 +1,133 @@
++from __future__ import annotations
++
++from pathlib import Path
++from types import SimpleNamespace
++
++import pytest
++from typer.testing import CliRunner
++
++from pyjev import BundleResult, Jev
++from pyjev.cli import app
++from pyjev.decisions import BundleDecision, DecisionConfigError, load_decision
++
++runner = CliRunner()
++
++
++class Dumpable(SimpleNamespace):
++    def model_dump(self, mode: str = "python"):
++        del mode
++        return dict(self.__dict__)
++
++
++class BundleResponse:
++    model = "bundle-model"
++    request_id = "request-bundle"
++    usage = Dumpable(input_tokens=20, output_tokens=8)
++
++    def __init__(self, names: list[str]):
++        self.nouls = {}
++        self.choices = {}
++        self.scores = {}
++        for name in names:
++            if name == "refund":
++                self.nouls[name] = Dumpable(type="noul", noul=0.81)
++            elif name == "route":
++                self.choices[name] = Dumpable(
++                    type="choice",
++                    choice="engineering",
++                    confidence=0.91,
++                    probabilities={"billing": 0.09, "engineering": 0.91},
++                )
++            elif name == "urgency":
++                self.scores[name] = Dumpable(
++                    type="score",
++                    score=2.4,
++                    confidence=0.87,
++                    probabilities={0: 0.1, 1: 0.2, 2: 0.3, 3: 0.4},
++                    legend={0: "low", 1: "normal", 2: "urgent", 3: "critical"},
++                )
++
++    def model_dump(self, mode: str = "python"):
++        del mode
++        return {"model": self.model, "request_id": self.request_id}
++
++
++class BundleClient:
++    def __init__(self):
++        self.calls = []
++
++    def system_one(self, *, state, questions, model=None):
++        self.calls.append((state, questions, model))
++        return BundleResponse(list(questions))
++
++    def close(self):
++        pass
++
++
++def bundle_config(tmp_path: Path, *, child_model: bool = False) -> Path:
++    child_model_text = '\nmodel = "child-model"' if child_model else ""
++    path = tmp_path / ".pyjev.toml"
++    path.write_text(
++        f'''[pyjev]
++schema = 1
++
++[decision.ticket-triage]
++type = "bundle"
++model = "bundle-config-model"
++
++[decision.ticket-triage.questions.refund]
++type = "noul"
++question = "Refund?"
++true = "Requests money back"
++false = "Does not request money back"
++
++[decision.ticket-triage.questions.route]
++type = "choice"
++question = "Which team?"{child_model_text}
++
++[decision.ticket-triage.questions.route.options]
++billing = "Payments"
++engineering = "Technical"
++
++[decision.ticket-triage.questions.urgency]
++type = "score"
++question = "How urgent?"
++levels = ["low", "normal", "urgent", "critical"]
++''',
++        encoding="utf-8",
++    )
++    return path
++
++
++def test_bundle_parser_preserves_child_keys_and_rejects_child_models(tmp_path: Path) -> None:
++    decision = load_decision("ticket-triage", bundle_config(tmp_path))
++    assert isinstance(decision, BundleDecision)
++    assert list(decision.questions) == ["refund", "route", "urgency"]
++    with pytest.raises(DecisionConfigError, match="child model"):
++        load_decision("ticket-triage", bundle_config(tmp_path, child_model=True))
++
++
++def test_bundle_uses_one_call_and_preserves_each_result(tmp_path: Path) -> None:
++    client = BundleClient()
++    result = Jev(client=client).decide("ticket-triage", state={"ticket": "down"}, config=bundle_config(tmp_path))
++    assert isinstance(result, BundleResult)
++    assert len(client.calls) == 1
++    assert list(result.answers) == ["refund", "route", "urgency"]
++    assert result.answers["refund"].value == 0.81
++    assert result.answers["route"].probabilities["engineering"] == 0.91
++    assert result.answers["urgency"].legend[3] == "critical"
++    assert result.request_id == "request-bundle"
++
++
++def test_bundle_cli_rejects_value_and_confidence_before_api(tmp_path: Path, monkeypatch) -> None:
++    monkeypatch.setattr("pyjev.cli._run_api", lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError()))
++    path = bundle_config(tmp_path)
++    value_result = runner.invoke(app, ["decide", "ticket-triage", "--config", str(path), "--state", "x", "--value"])
++    confidence_result = runner.invoke(
++        app,
++        ["decide", "ticket-triage", "--config", str(path), "--state", "x", "--min-confidence", "0.8"],
++    )
++    assert value_result.exit_code != 0
++    assert "not valid for bundle" in value_result.output
++    assert confidence_result.exit_code != 0
++    assert "not valid for bundle" in confidence_result.output
+diff --git a/tests/test_compile.py b/tests/test_compile.py
+new file mode 100644
+index 0000000..4d08ff8
+--- /dev/null
++++ b/tests/test_compile.py
+@@ -0,0 +1,54 @@
++from __future__ import annotations
++
++import json
++from pathlib import Path
++
++from typer.testing import CliRunner
++
++from pyjev import compile_decision
++from pyjev.cli import app
++
++runner = CliRunner()
++
++
++def config_file(tmp_path: Path) -> Path:
++    path = tmp_path / ".pyjev.toml"
++    path.write_text(
++        """[pyjev]
++schema = 1
++
++[decision.route]
++type = "choice"
++question = "Route this ticket"
++model = "decision-model"
++
++[decision.route.options]
++billing = "Payments"
++engineering = "Technical"
++""",
++        encoding="utf-8",
++    )
++    return path
++
++
++def test_compile_is_offline_and_uses_sdk_question_shape(tmp_path: Path, monkeypatch) -> None:
++    path = config_file(tmp_path)
++    monkeypatch.delenv("TYPESAFE_API_KEY", raising=False)
++    compiled = compile_decision("route", state="checkout fails", config=path, model="call-model")
++    payload = compiled.to_dict()
++    assert payload["request"]["model"] == "call-model"
++    assert payload["request"]["questions"]["answer"] == {
++        "type": "choice",
++        "instructions": "Route this ticket",
++        "criteria": {"billing": "Payments", "engineering": "Technical"},
++    }
++    assert "TYPESAFE_API_KEY" not in json.dumps(payload)
++
++
++def test_compile_command_defaults_to_secret_free_json(tmp_path: Path) -> None:
++    path = config_file(tmp_path)
++    result = runner.invoke(app, ["decision", "compile", "route", "--config", str(path), "--state", "state"])
++    assert result.exit_code == 0
++    payload = json.loads(result.stdout)
++    assert payload["decision"]["name"] == "route"
++    assert payload["request"]["questions"]["answer"]["type"] == "choice"
+diff --git a/tests/test_connect_four.py b/tests/test_connect_four.py
+index f372580..ebed349 100644
+--- a/tests/test_connect_four.py
++++ b/tests/test_connect_four.py
+@@ -325,7 +325,6 @@ def test_v3_single_deep_candidate_skips_jev(connect_four: ModuleType) -> None:
+     jev.choice.assert_not_called()
+
+
+-
+ def test_mechanics_cover_gravity_full_columns_and_win_directions(connect_four: ModuleType) -> None:
+     board = connect_four.new_board()
+     assert connect_four.drop_piece(board, 0, connect_four.HUMAN) == 5
+diff --git a/tests/test_decisions.py b/tests/test_decisions.py
+index 1a40710..804d3be 100644
+--- a/tests/test_decisions.py
++++ b/tests/test_decisions.py
+@@ -10,6 +10,7 @@ from pyjev.decisions import (
+     NoulDecision,
+     ScoreDecision,
+     find_config,
++    load_config,
+     load_decision,
+     load_decisions,
+ )
+@@ -107,3 +108,28 @@ def test_cardinality_is_validated_locally(tmp_path: Path, kind: str, field: str)
+ def test_missing_config_error_mentions_override() -> None:
+     with pytest.raises(DecisionConfigError, match=r"\.pyjev\.toml|--config"):
+         find_config(start="/")
++
++
++def test_explicit_schema_one_is_recorded(tmp_path: Path) -> None:
++    path = write_config(tmp_path, "[pyjev]\nschema = 1\n[decision.one]\ntype='noul'\nquestion='One'\n")
++    loaded = load_config(path)
++    assert loaded.schema == 1
++    assert loaded.path == path.resolve()
++
++
++def test_missing_schema_is_implicit_schema_one(tmp_path: Path) -> None:
++    path = write_config(tmp_path, "[decision.one]\ntype='noul'\nquestion='One'\n")
++    assert load_config(path).schema == 1
++
++
++@pytest.mark.parametrize(
++    "text",
++    [
++        "[pyjev]\nschema = 2\n[decision.one]\ntype='noul'\nquestion='One'\n",
++        "[pyjev]\nschema = '1'\n[decision.one]\ntype='noul'\nquestion='One'\n",
++        "[pyjev]\nunknown = true\n[decision.one]\ntype='noul'\nquestion='One'\n",
++    ],
++)
++def test_invalid_schema_is_rejected_before_decisions(tmp_path: Path, text: str) -> None:
++    with pytest.raises(DecisionConfigError, match=r"schema|unknown"):
++        load_decisions(write_config(tmp_path, text))
+diff --git a/tests/test_docs.py b/tests/test_docs.py
+new file mode 100644
+index 0000000..24b7752
+--- /dev/null
++++ b/tests/test_docs.py
+@@ -0,0 +1,28 @@
++from __future__ import annotations
++
++from pathlib import Path
++
++ROOT = Path(__file__).parents[1]
++
++
++def test_documentation_tree_and_build_script_are_present() -> None:
++    expected = {
++        "index.md",
++        "getting-started.md",
++        "concepts.md",
++        "python-api.md",
++        "cli.md",
++        "named-decisions.md",
++        "confidence.md",
++        "authentication.md",
++        "debugging.md",
++        "examples.md",
++        "comparisons.md",
++        "development.md",
++        "changelog.md",
++    }
++    assert expected <= {path.name for path in (ROOT / "docs").iterdir()}
++    script = (ROOT / "docs" / "make.py").read_text(encoding="utf-8")
++    assert "Path(__file__).resolve().parents[1]" in script
++    assert '"-m",\n        "sphinx"' in script
++    assert '"-W"' in script
