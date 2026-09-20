@@ -22,12 +22,19 @@ free-form text.
   that a Score can be fractional, prints the ordered legend and level probabilities,
   and demonstrates how ordinary Python can decline to act when confidence is low.
 
-- `connect_four.py` is an interactive game against Jev. The board and rules are
-  structured state, and every Jev turn is a direct dynamic `Choice` whose options
-  are only the currently legal columns. Python enforces gravity, legal moves, wins,
-  and draws; Jev chooses among the valid actions. The terminal also prints Jev's
-  confidence and complete move probability distribution.
-  The examples intentionally show the boundary between Jev/TypeSafe and pyjev:
+- `connect_four.py` is an interactive human-vs-Jev game. Python owns exact game
+  mechanics and one-ply tactical facts: gravity, legal moves, immediate wins,
+  forced blocks, and the board resulting from each candidate. Jev receives that
+  structured tactical view and chooses among the remaining genuine alternatives.
+  Forced moves do not call Jev because there is no decision to make. When Jev
+  does choose, the example prints its selected column, confidence, and complete
+  probability distribution over the candidate moves.
+
+This split is intentional. Jev is used as a judgment/decision model, not as a
+Connect Four board parser or deterministic rules engine. Giving the model
+precomputed facts makes the decision interface stronger and keeps exact logic in
+ordinary Python.
+The examples intentionally show the boundary between Jev/TypeSafe and pyjev:
 
 - TypeSafe supplies state evaluation, Choice and Score semantics, the selected answer
   or score, probabilities, confidence, and model response metadata.
