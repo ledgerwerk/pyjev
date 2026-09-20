@@ -2,58 +2,54 @@
 
 Reusable, confidence-aware [Jev](https://docs.typesafe.ai/introduction) decisions for Python and the shell.
 
-`pyjev` is intentionally a thin convenience layer over TypeSafe's official `typesafe-sdk`. It does not reimplement the HTTP API.
-
-## MVP features
-
-- flat package layout (`pyjev/`, no `src/` directory)
-- dynamic versions from Git tags via `setuptools-scm`
-- Python API for Noul, Choice, Score, and mixed-question requests
-- `pyjev` CLI with stdin/file support and JSON output
-- API-key lookup from `TYPESAFE_API_KEY` or the OS keyring
-- confidence gating for Choice and Score (`--min-confidence` exits with code 2)
+`pyjev` is a thin convenience layer over TypeSafe's official `typesafe-sdk`. TypeSafe owns HTTP transport, retries, API semantics, and SDK models; pyjev adds reusable named decisions, credential ergonomics, output safety, and a small CLI.
 
 ## Install
 
 ```bash
 pip install -e .
-# or
-uv pip install -e .
+# development
+pip install -e '.[dev]'
 ```
 
-For a CLI-only install from a future PyPI release:
-
-```bash
-uv tool install pyjev
-```
+For a published release, install the package from PyPI or use `uv tool install pyjev`.
 
 ## Authentication
 
-Environment variables are preferred in CI:
+Credential lookup has this precedence:
+
+1. explicit Python `api_key=...`;
+2. `TYPESAFE_API_KEY`;
+3. the operating-system keyring.
+
+Use the environment variable in CI:
 
 ```bash
 export TYPESAFE_API_KEY='...'
 ```
 
-For local use, store the key in the operating-system keyring:
+For local use, the interactive keyring prompt is preferred:
 
 ```bash
 pyjev auth set
 pyjev auth status
+pyjev auth delete
 ```
 
-If no usable keyring backend is available, use `TYPESAFE_API_KEY` instead.
+`pyjev auth set --api-key SECRET` is retained for automation, but may expose the secret in shell history. API keys must not be stored in `.pyjev.toml`.
 
 ## CLI
 
-Noul / yes-no probability:
+### Primitive decisions
+
+Noul evaluates a yes/no probability:
 
 ```bash
 pyjev ask "Does this customer request a refund?" \
-  --state "I want my money back"
+  --state "Please return my money."
 ```
 
-Choice:
+Choice preserves the selected label, confidence, and full probability distribution:
 
 ```bash
 pyjev choice "Where should this ticket go?" \
@@ -63,92 +59,140 @@ pyjev choice "Where should this ticket go?" \
   --option sales="Purchasing questions"
 ```
 
-Machine-friendly output:
-
-```bash
-cat ticket.txt | pyjev choice "Where should this ticket go?" \
-  --option billing \
-  --option engineering \
-  --option sales \
-  --json
-```
-
-Only print the selected value:
-
-```bash
-TEAM=$(cat ticket.txt | pyjev choice "Route this ticket" \
-  --option billing --option engineering --option sales --value)
-```
-
-Confidence gate (exit status `2` if confidence is below the threshold):
-
-```bash
-pyjev choice "Route this ticket" \
-  --state "Something odd happened" \
-  --option billing --option engineering --option sales \
-  --min-confidence 0.85
-```
-
-Score:
+Score accepts 2–10 ordered levels:
 
 ```bash
 pyjev score "How urgent is this?" \
-  --state "Production is down for all customers" \
+  --state "Production is down" \
   --level "Can wait" \
   --level "Normal" \
   --level "Urgent" \
   --level "Critical"
 ```
 
-Structured state can be JSON-decoded:
+State can come from `--state`, `--state-file`, or stdin. Add `--state-json` to decode it as JSON. Use `--json` for structured output or `--value` for only the selected value. These options cannot be combined.
+
+### Confidence gates
+
+Choice and Score support `--min-confidence`:
 
 ```bash
-pyjev ask "Is this order high value?" \
-  --state '{"total": 5000, "currency": "EUR"}' \
-  --state-json
+if TEAM="$(cat ticket.txt | pyjev choice "Route this ticket" \
+  --option billing --option engineering --option sales \
+  --min-confidence 0.85 --value)"; then
+  route_to "$TEAM"
+else
+  case "$?" in
+    3) human_review ;;
+    *) echo "pyjev failed" >&2; exit 1 ;;
+  esac
+fi
 ```
 
-Mixed questions in one request:
+The gate is evaluated before successful output. A failed `--value` gate emits an empty stdout and a concise stderr message. With `--json`, a failed gate emits an explicit envelope containing `gate.passed`, `minimum_confidence`, `confidence`, and the full `result`.
 
-```json
-{
-  "state": "I was charged twice and I am furious.",
-  "questions": {
-    "billing": {
-      "type": "noul",
-      "instructions": "Is this about billing?"
-    },
-    "tone": {
-      "type": "choice",
-      "instructions": "What is the tone?",
-      "criteria": {
-        "calm": null,
-        "angry": null
-      }
-    }
-  }
-}
+Noul has a probability of true rather than a Choice/Score confidence, so `--min-confidence` is not supported for Noul decisions.
+
+### Exit codes
+
+| Exit | Meaning                                                                            |
+| ---: | ---------------------------------------------------------------------------------- |
+|    0 | Successful result and any confidence gate passed                                   |
+|    1 | Runtime failure: credentials, keyring, TypeSafe API, network, or configuration I/O |
+|    2 | CLI usage or local argument validation error                                       |
+|    3 | Valid Choice/Score result obtained, but confidence gate failed                     |
+
+Expected TypeSafe failures are concise and do not print tracebacks by default.
+
+## Reusable named decisions
+
+Create `.pyjev.toml` in a project:
+
+```toml
+[decision.ticket-route]
+type = "choice"
+question = "Which team should handle this support request?"
+model = "jev-latest"
+
+[decision.ticket-route.options]
+billing = "Billing, invoice, payment, or refund issue"
+engineering = "Technical problem or product bug"
+sales = "Purchasing, pricing, or procurement question"
+other = "None of the above"
+
+[decision.urgency]
+type = "score"
+question = "How urgent is this?"
+levels = ["can wait", "normal", "urgent", "critical"]
+
+[decision.refund-request]
+type = "noul"
+question = "Does the customer request a refund?"
+true = "The customer wants money returned."
+false = "The customer does not request money returned."
 ```
+
+Named decisions are read-only declarations. They support Noul, Choice, Score, and an optional per-decision model. Unknown fields and invalid cardinalities are rejected before any API request.
+
+Configuration precedence is:
+
+1. explicit Python `config=` or CLI `--config PATH`;
+2. `PYJEV_CONFIG`;
+3. the nearest `.pyjev.toml` in the current directory or a parent directory.
+
+Use the management commands to inspect declarations:
 
 ```bash
-pyjev run request.json
-# or
-cat request.json | pyjev run -
+pyjev decision list
+pyjev decision list --json
+pyjev decision show ticket-route --json
+pyjev decision validate
 ```
 
-List models available to the account:
+Run a named decision from the shell:
 
 ```bash
-pyjev models
+echo "Stripe webhooks keep failing" |
+  pyjev decide ticket-route --min-confidence 0.85 --json
 ```
 
-## Python
+The command supports the same state, model, config, output, and confidence options as primitive Choice/Score commands.
+
+## Python API
 
 ```python
 from pyjev import Jev
 
 with Jev() as jev:
-    result = jev.choice(
+    result = jev.decide(
+        "ticket-route",
+        state="Stripe webhooks keep failing",
+    )
+
+if result.confidence >= 0.85:
+    route(result.value)
+```
+
+A short-lived top-level convenience function is also available:
+
+```python
+from pyjev import decide
+
+result = decide(
+    "ticket-route",
+    "Stripe checkout fails",
+    config="ops/.pyjev.toml",
+    model="jev-latest",  # explicit override wins over the TOML model
+)
+```
+
+Direct primitive methods remain available:
+
+```python
+from pyjev import Jev
+
+with Jev() as jev:
+    choice = jev.choice(
         "Which team should handle this?",
         state="Stripe checkout crashes.",
         choices={
@@ -157,86 +201,30 @@ with Jev() as jev:
             "sales": "Purchasing questions",
         },
     )
-
-print(result.value)
-print(result.confidence)
-print(result.probabilities)
-```
-
-Noul:
-
-```python
-with Jev() as jev:
-    result = jev.ask(
-        "Does this customer request a refund?",
-        state="Please return my money.",
-    )
-
-print(result.value)  # 0..1 probability of yes/true
-```
-
-Score:
-
-```python
-with Jev() as jev:
-    result = jev.score(
+    score = jev.score(
         "How urgent is this?",
         state="Production is down.",
         levels=["Can wait", "Normal", "Urgent", "Critical"],
     )
-
-print(result.value)       # expected score, potentially fractional
-print(result.confidence)
 ```
 
-For several independent questions, use one API request:
+`ChoiceResult` and `ScoreResult` preserve `value`, `confidence`, all probabilities, model, usage, raw answer data, and `request_id`. `NoulResult.value` is the raw probability of true and is not converted to a boolean.
 
-```python
-from typesafe_sdk import Choice, Noul
-from pyjev import Jev
+For several heterogeneous questions, use `jev.run(...)` to send one mixed request through the SDK.
 
-with Jev() as jev:
-    response = jev.run(
-        state="I was charged twice and I am furious.",
-        questions={
-            "billing": Noul(instructions="Is this about billing?"),
-            "tone": Choice(
-                instructions="What is the tone?",
-                criteria={"calm": None, "angry": None},
-            ),
-        },
-    )
-```
+## Versioning and development
 
-## Dynamic versioning
-
-There is no hard-coded package version in `pyproject.toml`.
-
-`setuptools-scm` derives versions from Git tags. Use tags such as:
+Versions are derived from Git tags with `setuptools-scm`; a tagged `v0.1.0` checkout builds as `0.1.0`.
 
 ```bash
-git tag v0.1.0
-python -m build
-```
-
-A normal tagged checkout builds as `0.1.0`. Commits after a tag receive an SCM-derived development version. The source snapshot also supports extracting from a directory named `pyjev-X.Y.Z`; otherwise a non-Git snapshot falls back to `0.0.0` so it remains buildable.
-
-At runtime:
-
-```python
-import pyjev
-print(pyjev.__version__)
-```
-
-## Development
-
-```bash
-pip install -e '.[dev]'
+python -m compileall pyjev
 pytest
 ruff check .
+python -m build
+twine check dist/*
 ```
 
-No live API key is required for the unit tests.
+No live API key is required for the unit tests. CI tests Python 3.10–3.14, builds wheel and sdist artifacts, checks package metadata, and smoke-tests an installed wheel.
 
 ## License
 

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+import pytest
+
 from pyjev import Jev
 
 
@@ -14,6 +16,7 @@ class Dumpable(SimpleNamespace):
 class FakeResponse:
     def __init__(self, kind: str):
         self.model = "jev-test"
+        self.request_id = "request-123"
         self.usage = Dumpable(input_tokens=10, output_tokens=2)
         self.nouls = {}
         self.choices = {}
@@ -108,3 +111,62 @@ def test_run_keeps_mixed_request_shape():
 def test_models():
     jev = Jev(client=FakeClient())
     assert jev.models()[0]["name"] == "jev-test"
+
+
+def test_request_id_is_preserved():
+    result = Jev(client=FakeClient()).ask("Question?", state="state")
+    assert result.request_id == "request-123"
+    assert result.to_dict()["request_id"] == "request-123"
+
+
+@pytest.mark.parametrize("choices", [[], ["one"], ["one", "one"]])
+def test_invalid_choice_sequence_makes_no_api_call(choices):
+    client = FakeClient()
+    with pytest.raises(ValueError):
+        Jev(client=client).choice("Route?", state="state", choices=choices)
+    assert client.calls == []
+
+
+def test_choice_rejects_256_options_without_api_call():
+    client = FakeClient()
+    with pytest.raises(ValueError, match="255"):
+        Jev(client=client).choice("Route?", state="state", choices=[str(i) for i in range(256)])
+    assert client.calls == []
+
+
+@pytest.mark.parametrize("levels", [[], ["one"], [str(i) for i in range(11)]])
+def test_invalid_score_levels_make_no_api_call(levels):
+    client = FakeClient()
+    with pytest.raises(ValueError, match="2 and 10"):
+        Jev(client=client).score("Score?", state="state", levels=levels)
+    assert client.calls == []
+
+
+def test_injected_client_rejects_constructor_options():
+    with pytest.raises(ValueError, match="injected client"):
+        Jev(client=FakeClient(), model="model")
+
+
+def test_named_decision_dispatch_uses_explicit_model_override(tmp_path):
+    config = tmp_path / ".pyjev.toml"
+    config.write_text(
+        "[decision.route]\ntype='choice'\nquestion='Route?'\nmodel='decision-model'\n"
+        "[decision.route.options]\nbilling='Billing'\nengineering='Technical'\n",
+        encoding="utf-8",
+    )
+    client = FakeClient()
+    result = Jev(client=client).decide("route", state="ticket", config=config, model="call-model")
+    assert result.value == "engineering"
+    assert client.calls[-1][2] == "call-model"
+
+
+def test_named_decision_uses_config_model_when_call_model_absent(tmp_path):
+    config = tmp_path / ".pyjev.toml"
+    config.write_text(
+        "[decision.route]\ntype='choice'\nquestion='Route?'\nmodel='decision-model'\n"
+        "[decision.route.options]\nbilling='Billing'\nengineering='Technical'\n",
+        encoding="utf-8",
+    )
+    client = FakeClient()
+    Jev(client=client).decide("route", state="ticket", config=config)
+    assert client.calls[-1][2] == "decision-model"

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from pathlib import Path
 from types import TracebackType
 from typing import Any
 
@@ -10,6 +11,39 @@ from typesafe_sdk import Choice, Noul, Question, Score, TypeSafeClient
 
 from .credentials import get_api_key
 from .results import ChoiceResult, NoulResult, ScoreResult
+
+
+def _request_id(response: Any) -> str | None:
+    """Read the SDK's public request-id property when a response has one."""
+    try:
+        value = response.request_id
+    except Exception:  # SDK response fakes and non-HTTP responses may omit metadata.
+        return None
+    return value if isinstance(value, str) else None
+
+
+def _validate_choice_criteria(choices: Mapping[str, Any | None] | Sequence[str]) -> dict[str, Any | None]:
+    if isinstance(choices, Mapping):
+        criteria = dict(choices)
+    else:
+        labels = list(choices)
+        if len(labels) != len(set(labels)):
+            raise ValueError("choice sequence contains duplicate labels")
+        criteria = {name: None for name in labels}
+
+    if not 2 <= len(criteria) <= 255:
+        raise ValueError("choice requires between 2 and 255 options")
+    for label in criteria:
+        if not isinstance(label, str) or not label.strip():
+            raise ValueError("choice labels must be nonempty strings")
+    return criteria
+
+
+def _validate_score_levels(levels: Sequence[Any]) -> list[Any]:
+    values = list(levels)
+    if not 2 <= len(values) <= 10:
+        raise ValueError("score requires between 2 and 10 levels")
+    return values
 
 
 class Jev:
@@ -27,11 +61,17 @@ class Jev:
         timeout: float | None = None,
         client: TypeSafeClient | None = None,
     ) -> None:
+        if client is not None and any(value is not None for value in (api_key, model, timeout)):
+            raise ValueError("api_key, model, and timeout cannot be used with an injected client")
         self._owns_client = client is None
-        self._client = client or TypeSafeClient(
-            api_key=get_api_key(api_key),
-            model=model,
-            timeout=timeout,
+        self._client = (
+            client
+            if client is not None
+            else TypeSafeClient(
+                api_key=get_api_key(api_key),
+                model=model,
+                timeout=timeout,
+            )
         )
 
     @property
@@ -74,6 +114,7 @@ class Jev:
             model=response.model,
             usage=response.usage.model_dump(mode="json"),
             raw=answer.model_dump(mode="json"),
+            request_id=_request_id(response),
         )
 
     def choice(
@@ -84,13 +125,7 @@ class Jev:
         choices: Mapping[str, Any | None] | Sequence[str],
         model: str | None = None,
     ) -> ChoiceResult:
-        if isinstance(choices, Mapping):
-            criteria = dict(choices)
-        else:
-            criteria = {name: None for name in choices}
-        if len(criteria) < 2:
-            raise ValueError("choice requires at least two options")
-
+        criteria = _validate_choice_criteria(choices)
         response = self._client.system_one(
             state=state,
             questions={"answer": Choice(instructions=question, criteria=criteria)},
@@ -104,6 +139,7 @@ class Jev:
             model=response.model,
             usage=response.usage.model_dump(mode="json"),
             raw=answer.model_dump(mode="json"),
+            request_id=_request_id(response),
         )
 
     def score(
@@ -114,12 +150,10 @@ class Jev:
         levels: Sequence[Any],
         model: str | None = None,
     ) -> ScoreResult:
-        if not levels:
-            raise ValueError("score requires at least one level")
-
+        values = _validate_score_levels(levels)
         response = self._client.system_one(
             state=state,
-            questions={"answer": Score(instructions=question, criteria=list(levels))},
+            questions={"answer": Score(instructions=question, criteria=values)},
             model=model,
         )
         answer = response.scores["answer"]
@@ -131,7 +165,35 @@ class Jev:
             model=response.model,
             usage=response.usage.model_dump(mode="json"),
             raw=answer.model_dump(mode="json"),
+            request_id=_request_id(response),
         )
+
+    def decide(
+        self,
+        name: str,
+        *,
+        state: Any,
+        config: str | Path | None = None,
+        model: str | None = None,
+    ) -> NoulResult | ChoiceResult | ScoreResult:
+        """Evaluate a validated named decision from a TOML configuration."""
+        from .decisions import ChoiceDecision, NoulDecision, ScoreDecision, load_decision
+
+        decision = load_decision(name, config)
+        effective_model = model if model is not None else decision.model
+        if isinstance(decision, NoulDecision):
+            return self.noul(
+                decision.question,
+                state=state,
+                true=decision.true,
+                false=decision.false,
+                model=effective_model,
+            )
+        if isinstance(decision, ChoiceDecision):
+            return self.choice(decision.question, state=state, choices=decision.options, model=effective_model)
+        if isinstance(decision, ScoreDecision):
+            return self.score(decision.question, state=state, levels=decision.levels, model=effective_model)
+        raise TypeError(f"Unsupported decision type: {type(decision).__name__}")
 
     def run(
         self,

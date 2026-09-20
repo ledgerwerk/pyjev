@@ -12,9 +12,10 @@ class NoulResult:
     model: str
     usage: dict[str, Any]
     raw: dict[str, Any]
+    request_id: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        return {**self.raw, "model": self.model, "usage": self.usage}
+        return {**self.raw, "model": self.model, "usage": self.usage, "request_id": self.request_id}
 
 
 @dataclass(frozen=True, slots=True)
@@ -25,9 +26,10 @@ class ChoiceResult:
     model: str
     usage: dict[str, Any]
     raw: dict[str, Any]
+    request_id: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        return {**self.raw, "model": self.model, "usage": self.usage}
+        return {**self.raw, "model": self.model, "usage": self.usage, "request_id": self.request_id}
 
 
 @dataclass(frozen=True, slots=True)
@@ -39,6 +41,7 @@ class ScoreResult:
     model: str
     usage: dict[str, Any]
     raw: dict[str, Any]
+    request_id: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        return {**self.raw, "model": self.model, "usage": self.usage}
+        return {**self.raw, "model": self.model, "usage": self.usage, "request_id": self.request_id}
