@@ -20,15 +20,22 @@ Credential lookup has this precedence:
 
 1. explicit Python `api_key=...`;
 2. `TYPESAFE_API_KEY`;
-3. the operating-system keyring.
+3. the operating-system keyring;
+4. `~/.config/pyjev/credentials` (or `$XDG_CONFIG_HOME/pyjev/credentials`).
 
-Use the environment variable in CI:
+For local use, `pyjev auth set` first tries the operating-system keyring. If no usable
+keyring backend is available, interactive use can fall back to
+`~/.config/pyjev/credentials` after an explicit warning. The fallback is plaintext
+and should be readable only by your user account. Restrictive file permissions do not
+make it encrypted or equivalent to a keyring.
+
+Use the environment variable in CI and ephemeral environments:
 
 ```bash
 export TYPESAFE_API_KEY='...'
 ```
 
-For local use, the interactive keyring prompt is preferred:
+Local authentication commands:
 
 ```bash
 pyjev auth set
@@ -36,7 +43,17 @@ pyjev auth status
 pyjev auth delete
 ```
 
-`pyjev auth set --api-key SECRET` is retained for automation, but may expose the secret in shell history. API keys must not be stored in `.pyjev.toml`.
+Storage can be selected explicitly:
+
+```bash
+pyjev auth set --storage keyring
+pyjev auth set --storage file
+```
+
+`pyjev auth set --api-key SECRET` is retained for automation, but may expose the
+secret in shell history. Use `--storage file` only when the plaintext tradeoff is
+acceptable. API keys must never be stored in project `.pyjev.toml` decision files;
+the optional plaintext fallback is a separate user-level credential file.
 
 ## CLI
 
@@ -98,7 +115,7 @@ Noul has a probability of true rather than a Choice/Score confidence, so `--min-
 | Exit | Meaning                                                                            |
 | ---: | ---------------------------------------------------------------------------------- |
 |    0 | Successful result and any confidence gate passed                                   |
-|    1 | Runtime failure: credentials, keyring, TypeSafe API, network, or configuration I/O |
+|    1 | Runtime failure: credentials, keyring, credential-file, TypeSafe API, network, or configuration I/O |
 |    2 | CLI usage or local argument validation error                                       |
 |    3 | Valid Choice/Score result obtained, but confidence gate failed                     |
 

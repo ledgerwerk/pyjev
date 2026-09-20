@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 from collections.abc import Callable
+from enum import Enum
 from pathlib import Path
 from typing import Any, TypeVar
 
@@ -19,7 +21,15 @@ from typesafe_sdk import (
 
 from . import __version__
 from .client import Jev
-from .credentials import CredentialError, credential_source, delete_api_key, set_api_key
+from .credentials import (
+    ENV_NAME,
+    CredentialError,
+    credential_file_path,
+    credential_source,
+    delete_api_key,
+    set_api_key,
+    set_file_api_key,
+)
 from .decisions import (
     DecisionConfigError,
     NoulDecision,
@@ -369,31 +379,91 @@ def decide(
     )
 
 
+class CredentialStorage(str, Enum):
+    auto = "auto"
+    keyring = "keyring"
+    file = "file"
+
+
+def _file_warning(path: Path) -> None:
+    typer.echo(
+        f"Warning: {path} stores the API key as plaintext readable by your user account.",
+        err=True,
+    )
+
+
 @auth_app.command("set")
 def auth_set(
-    api_key: str = typer.Option(
-        ...,
+    api_key: str | None = typer.Option(
+        None,
         "--api-key",
-        prompt="TypeSafe API key",
-        hide_input=True,
-        help="API key to store in the OS keyring.",
+        help="API key. Omit to enter it interactively.",
+    ),
+    storage: CredentialStorage = typer.Option(
+        CredentialStorage.auto,
+        "--storage",
+        help="Credential storage: auto, keyring, or file.",
     ),
 ) -> None:
+    interactive_key = api_key is None
+    if api_key is None:
+        api_key = typer.prompt("TypeSafe API key", hide_input=True)
+
+    if storage == CredentialStorage.file:
+        path = credential_file_path()
+        _file_warning(path)
+        try:
+            set_file_api_key(api_key)
+        except CredentialError as exc:
+            typer.echo(str(exc), err=True)
+            raise typer.Exit(code=EXIT_RUNTIME_ERROR) from exc
+        typer.echo(f"Stored TypeSafe API key in {path}.")
+        return
+
     try:
         set_api_key(api_key)
     except CredentialError as exc:
         typer.echo(str(exc), err=True)
-        raise typer.Exit(code=EXIT_RUNTIME_ERROR) from exc
+        if storage == CredentialStorage.keyring:
+            raise typer.Exit(code=EXIT_RUNTIME_ERROR) from exc
+        if not interactive_key:
+            typer.echo(
+                f"Set {ENV_NAME} or use --storage file to store the key in a user-level plaintext file.",
+                err=True,
+            )
+            raise typer.Exit(code=EXIT_RUNTIME_ERROR) from exc
+
+        path = credential_file_path()
+        _file_warning(path)
+        if not typer.confirm("Store the API key there?", default=False):
+            typer.echo(
+                f"API key was not stored. Set {ENV_NAME} or configure an OS keyring.",
+                err=True,
+            )
+            raise typer.Exit(code=EXIT_RUNTIME_ERROR) from exc
+        try:
+            set_file_api_key(api_key)
+        except CredentialError as file_exc:
+            typer.echo(str(file_exc), err=True)
+            raise typer.Exit(code=EXIT_RUNTIME_ERROR) from file_exc
+        typer.echo(f"Stored TypeSafe API key in {path}.")
+        return
     typer.echo("Stored TypeSafe API key in the OS keyring.")
 
 
 @auth_app.command("status")
 def auth_status() -> None:
-    source = credential_source()
+    try:
+        source = credential_source()
+    except CredentialError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=EXIT_RUNTIME_ERROR) from exc
     if source == "environment":
-        typer.echo("API key available from TYPESAFE_API_KEY.")
+        typer.echo(f"API key available from {ENV_NAME}.")
     elif source == "keyring":
         typer.echo("API key stored in the OS keyring.")
+    elif source == "file":
+        typer.echo(f"API key stored in {credential_file_path()} (plaintext file).")
     else:
         typer.echo("No API key found.")
         raise typer.Exit(code=EXIT_RUNTIME_ERROR)
@@ -407,7 +477,8 @@ def auth_delete() -> None:
         typer.echo(str(exc), err=True)
         raise typer.Exit(code=EXIT_RUNTIME_ERROR) from exc
     typer.echo("Deleted stored API key." if removed else "No stored API key found.")
-
+    if os.getenv(ENV_NAME) is not None:
+        typer.echo(f"{ENV_NAME} is still set and remains the active credential.")
 
 @decision_app.command("list")
 def decision_list(

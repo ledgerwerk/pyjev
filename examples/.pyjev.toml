@@ -1,0 +1,28 @@
+[decision.emergency-snack]
+type = "choice"
+question = "Which snack should the on-call engineer bring to the emergency room?"
+
+[decision.emergency-snack.options]
+fruit = "Portable fruit that will not make the keyboard sticky"
+pretzels = "A salty snack that survives a long incident"
+chocolate = "A morale boost for the person holding the pager"
+
+[decision.haunted-ci]
+type = "score"
+question = "How urgent is this haunted CI failure?"
+levels = ["monitor", "investigate", "interrupt someone", "wake the release manager"]
+
+[decision.meeting-escape]
+type = "noul"
+question = "Should the team escape this meeting before it becomes another recurring series?"
+true = "The meeting has no owner, agenda, or decision to make."
+false = "The meeting still has a concrete decision worth making."
+
+[decision.meeting-risk]
+type = "choice"
+question = "What is the safest way to handle this meeting?"
+
+[decision.meeting-risk.options]
+attend = "Attend and bring a written decision to make"
+shorten = "Shorten the meeting and capture the decision asynchronously"
+escape = "Decline politely and send the decision template"
