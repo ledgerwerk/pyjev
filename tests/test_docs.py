@@ -15,6 +15,7 @@ def test_documentation_tree_and_build_script_are_present() -> None:
         "named-decisions.md",
         "confidence.md",
         "authentication.md",
+        "agent-skill.md",
         "debugging.md",
         "examples.md",
         "comparisons.md",
@@ -26,3 +27,16 @@ def test_documentation_tree_and_build_script_are_present() -> None:
     assert "Path(__file__).resolve().parents[1]" in script
     assert '"-m",\n        "sphinx"' in script
     assert '"-W"' in script
+
+
+def test_documentation_emphasizes_decision_contracts_and_boundaries() -> None:
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    comparison = (ROOT / "docs" / "comparisons.md").read_text(encoding="utf-8")
+    skill = (ROOT / "skills" / "pyjev" / "SKILL.md").read_text(encoding="utf-8")
+    assert readme.index("decision contracts") < readme.index("Direct dynamic decisions")
+    assert "`typesafe-sdk`" in readme
+    assert "official" in readme
+    assert "version **0.6.2**" in comparison
+    assert "not interchangeable" in comparison
+    assert "pyjev decision compile" in skill
+    assert "confidence" in skill.lower()

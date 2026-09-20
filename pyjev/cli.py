@@ -402,6 +402,74 @@ class CredentialStorage(str, Enum):
     file = "file"
 
 
+def _auth_test_failure(source: str, exc: Exception, *, json_output: bool) -> None:
+    """Emit a secret-free authentication-test failure and exit."""
+    if isinstance(exc, CredentialError):
+        status = "local_error"
+        message = "Could not resolve the configured credential."
+    elif isinstance(exc, TypeSafeAuthenticationError):
+        status = "rejected"
+        message = "TypeSafe authentication failed."
+    elif isinstance(exc, TypeSafeAPITimeoutError):
+        status = "unavailable"
+        message = "The TypeSafe request timed out."
+    elif isinstance(exc, TypeSafeAPIConnectionError):
+        status = "unavailable"
+        message = "Could not reach TypeSafe."
+    elif isinstance(exc, TypeSafeAPIError):
+        status = "api_error"
+        message = "The TypeSafe API rejected the authentication test."
+    elif isinstance(exc, TypeSafeError):
+        status = "error"
+        message = "The TypeSafe authentication test failed."
+    else:
+        status = "error"
+        message = "The authentication test failed unexpectedly."
+    if json_output:
+        _print_json({"ok": False, "credential_source": source, "status": status, "error": message})
+    else:
+        typer.echo(f"credential: {source}", err=True)
+        typer.echo(f"status: {status}", err=True)
+        typer.echo(f"error: {message}", err=True)
+    raise typer.Exit(code=EXIT_RUNTIME_ERROR) from exc
+
+
+@auth_app.command("test")
+def auth_test(
+    json_output: bool = typer.Option(False, "--json", help="Emit JSON."),
+) -> None:
+    """Verify the active credential with one minimal official-SDK request."""
+    try:
+        source = credential_source()
+    except CredentialError as exc:
+        _auth_test_failure("unknown", exc, json_output=json_output)
+    if source == "missing":
+        _auth_test_failure(
+            source,
+            CredentialError("No TypeSafe API key found."),
+            json_output=json_output,
+        )
+    try:
+        with Jev() as jev:
+            result = jev.auth_test()
+    except (
+        CredentialError,
+        TypeSafeAuthenticationError,
+        TypeSafeAPITimeoutError,
+        TypeSafeAPIConnectionError,
+        TypeSafeAPIError,
+        TypeSafeError,
+    ) as exc:
+        _auth_test_failure(source, exc, json_output=json_output)
+    payload = {"ok": True, "credential_source": source, "model": result.model}
+    if json_output:
+        _print_json(payload)
+    else:
+        typer.echo(f"credential: {source}")
+        typer.echo("status: valid")
+        typer.echo(f"model: {result.model}")
+
+
 def _file_warning(path: Path) -> None:
     typer.echo(
         f"Warning: {path} stores the API key as plaintext readable by your user account.",
@@ -414,7 +482,7 @@ def auth_set(
     api_key: str | None = typer.Option(
         None,
         "--api-key",
-        help="API key. Omit to enter it interactively.",
+        help="API key (unsafe: may leak through shell history/process listings). Omit to enter it interactively.",
     ),
     storage: CredentialStorage = typer.Option(
         CredentialStorage.auto,

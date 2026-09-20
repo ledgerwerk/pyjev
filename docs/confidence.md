@@ -33,3 +33,7 @@ this pass, and it does not invent a default threshold.
 
 Noul returns a probability of true and does not expose the Choice/Score confidence gate.
 Choose and document an application policy explicitly when using Noul.
+
+The numeric exit codes are part of pyjev's CLI contract, not a Jev or cross-tool
+standard. Do not assume they match `jev-cli`; a pyjev exit `3` specifically means
+the returned Choice/Score result did not satisfy the caller's threshold.

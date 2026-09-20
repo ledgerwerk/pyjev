@@ -47,6 +47,12 @@ print(compiled.to_dict())
 Compilation resolves and validates configuration without creating a client or reading
 credentials. It is useful for review, debugging, and agent tooling.
 
+`CompiledDecision.fingerprint` is a deterministic SHA-256 identifier for the
+validated declaration. It excludes the runtime state passed to
+`compile_decision()` and does not include credentials or absolute config paths.
+The serialized preview includes `schema = 1`, a reproducible config identifier,
+the fingerprint, and the normalized official SDK request shape.
+
 ## Injected clients
 
 ```python

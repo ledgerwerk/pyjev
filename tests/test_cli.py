@@ -1,3 +1,6 @@
+import json
+from types import SimpleNamespace
+
 from typer.testing import CliRunner
 
 import pyjev.cli as cli
@@ -11,6 +14,109 @@ def test_version():
     result = runner.invoke(app, ["--version"])
     assert result.exit_code == 0
     assert result.stdout.strip()
+
+
+class FakeAuthJev:
+    def __init__(self, result=None, error=None):
+        self.result = result or SimpleNamespace(model="jev-test")
+        self.error = error
+        self.calls = 0
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        return None
+
+    def auth_test(self):
+        self.calls += 1
+        if self.error is not None:
+            raise self.error
+        return self.result
+
+
+def test_auth_test_human_output(monkeypatch):
+    fake = FakeAuthJev()
+    monkeypatch.setattr(cli, "Jev", lambda: fake)
+    monkeypatch.setattr(cli, "credential_source", lambda: "keyring")
+
+    result = runner.invoke(app, ["auth", "test"])
+
+    assert result.exit_code == 0
+    assert "credential: keyring" in result.stdout
+    assert "status: valid" in result.stdout
+    assert "model: jev-test" in result.stdout
+    assert fake.calls == 1
+
+
+def test_auth_test_json_output(monkeypatch):
+    monkeypatch.setattr(cli, "Jev", lambda: FakeAuthJev())
+    monkeypatch.setattr(cli, "credential_source", lambda: "environment")
+
+    result = runner.invoke(app, ["auth", "test", "--json"])
+
+    assert result.exit_code == 0
+    assert json.loads(result.stdout) == {
+        "credential_source": "environment",
+        "model": "jev-test",
+        "ok": True,
+    }
+
+
+def test_auth_test_missing_credential_does_not_construct_client(monkeypatch):
+    def unexpected_client():
+        raise AssertionError("client must not be constructed")
+
+    monkeypatch.setattr(cli, "Jev", unexpected_client)
+    monkeypatch.setattr(cli, "credential_source", lambda: "missing")
+
+    result = runner.invoke(app, ["auth", "test", "--json"])
+
+    assert result.exit_code == 1
+    assert json.loads(result.stdout) == {
+        "credential_source": "missing",
+        "error": "Could not resolve the configured credential.",
+        "ok": False,
+        "status": "local_error",
+    }
+
+
+def test_auth_test_rejection_never_prints_secret(monkeypatch):
+    secret = "secret-key"
+    error = cli.TypeSafeAuthenticationError(401, {}, None, secret)
+    monkeypatch.setattr(cli, "Jev", lambda: FakeAuthJev(error=error))
+    monkeypatch.setattr(cli, "credential_source", lambda: "environment")
+
+    result = runner.invoke(app, ["auth", "test", "--json"])
+
+    assert result.exit_code == 1
+    assert json.loads(result.stdout) == {
+        "credential_source": "environment",
+        "error": "TypeSafe authentication failed.",
+        "ok": False,
+        "status": "rejected",
+    }
+    assert secret not in result.output
+
+
+def test_auth_test_connection_failure_is_safe(monkeypatch):
+    monkeypatch.setattr(cli, "Jev", lambda: FakeAuthJev(error=cli.TypeSafeAPIConnectionError("offline")))
+    monkeypatch.setattr(cli, "credential_source", lambda: "keyring")
+
+    result = runner.invoke(app, ["auth", "test"])
+
+    assert result.exit_code == 1
+    assert "credential: keyring" in result.output
+    assert "status: unavailable" in result.output
+    assert "Could not reach TypeSafe." in result.output
+    assert "offline" not in result.output
+
+
+def test_auth_set_help_warns_about_api_key_leakage():
+    result = runner.invoke(app, ["auth", "set", "--help"])
+    assert result.exit_code == 0
+    assert "unsafe" in result.output
+    assert "shell history" in result.output
 
 
 def test_choice_requires_two_options():

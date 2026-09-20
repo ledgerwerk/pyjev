@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 from dataclasses import dataclass
@@ -310,3 +311,18 @@ def decision_to_dict(decision: Decision) -> dict[str, Any]:
     if decision.model is not None:
         result["model"] = decision.model
     return result
+
+
+def decision_spec_fingerprint(decision: Decision, *, schema: int = 1) -> str:
+    """Return a deterministic SHA-256 fingerprint of a decision declaration.
+
+    The fingerprint covers the validated decision specification and schema, but
+    intentionally excludes runtime state, credentials, and configuration paths.
+    """
+    canonical = json.dumps(
+        {"schema": schema, "decision": decision_to_dict(decision)},
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()

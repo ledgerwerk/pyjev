@@ -68,6 +68,36 @@ Bundle results preserve every child result's probabilities and confidence, plus 
 model, usage, raw response, and request ID. Bundles have no aggregate confidence policy;
 `--value` and `--min-confidence` are rejected.
 
+## Compiled output contract
+
+`decision compile` produces a credential-free JSON preview with this stable top-level shape:
+
+```json
+{
+  "schema": 1,
+  "decision": {
+    "name": "ticket-route",
+    "type": "choice",
+    "config": ".pyjev.toml",
+    "fingerprint": "<sha256>"
+  },
+  "request": { "state": "...", "questions": {}, "model": null }
+}
+```
+
+The `schema` marker is the compiled-output contract version. `decision.name`,
+`decision.type`, `decision.config`, `decision.fingerprint`, and the request fields
+are stable contract fields. The config identifier is relative to the current
+project when possible and otherwise uses the config filename; it is never an
+absolute machine path. Question and answer data retain the official SDK shape.
+
+The SHA-256 `fingerprint` identifies the validated decision specification and
+schema. It includes the decision name, type, criteria, model, and declaration
+content. It excludes runtime `state`, credentials, and environment-specific
+absolute paths, so the same declaration has the same fingerprint in different
+checkouts. Compilation remains local: it does not construct a client, read a
+credential, or contact the API.
+
 ## Discovery and inspection
 
 Configuration precedence is explicit `config=`/`--config`, then `PYJEV_CONFIG`, then the

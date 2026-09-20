@@ -9,7 +9,15 @@ from typing import Any
 
 from typesafe_sdk import Choice, Noul, NoulCriteria, Question, Score
 
-from .decisions import BundleDecision, ChoiceDecision, Decision, NoulDecision, ScoreDecision, load_decision
+from .decisions import (
+    BundleDecision,
+    ChoiceDecision,
+    Decision,
+    NoulDecision,
+    ScoreDecision,
+    decision_spec_fingerprint,
+    load_decision,
+)
 
 
 def validate_choice_criteria(choices: Mapping[str, Any | None] | Sequence[str]) -> dict[str, Any | None]:
@@ -73,6 +81,15 @@ def build_decision_questions(decision: Decision) -> dict[str, Question]:
     return {"answer": build_question(decision)}
 
 
+def _config_identifier(path: Path) -> str:
+    """Return a stable, non-absolute identifier for compiled output."""
+    resolved = path.expanduser().resolve()
+    try:
+        return resolved.relative_to(Path.cwd().resolve()).as_posix()
+    except ValueError:
+        return resolved.name
+
+
 @dataclass(frozen=True, slots=True)
 class CompiledDecision:
     """A credential-free, normalized request preview for a named decision."""
@@ -83,14 +100,18 @@ class CompiledDecision:
     questions: dict[str, Question]
     model: str | None
     config_path: Path
+    schema: int
+    fingerprint: str
 
     def to_dict(self) -> dict[str, Any]:
-        """Return a deterministic JSON-compatible representation without secrets."""
+        """Return the stable, deterministic JSON-compatible preview contract."""
         return {
+            "schema": self.schema,
             "decision": {
                 "name": self.name,
                 "type": self.kind,
-                "config": str(self.config_path),
+                "config": _config_identifier(self.config_path),
+                "fingerprint": self.fingerprint,
             },
             "request": {
                 "state": self.state,
@@ -148,4 +169,6 @@ def compile_decision(
         questions=build_decision_questions(decision),
         model=effective_model,
         config_path=path,
+        schema=1,
+        fingerprint=decision_spec_fingerprint(decision),
     )

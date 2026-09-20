@@ -1,6 +1,7 @@
 # Getting started
 
-This page takes a new user from installation to a first decision in about five minutes.
+This walkthrough introduces pyjev's main idea: define a reusable decision
+contract, inspect it offline, then use the same contract from shell and Python.
 
 ## Install
 
@@ -15,58 +16,9 @@ For a checkout, install contributor and documentation dependencies separately:
 pip install -e '.[dev,docs]'
 ```
 
-## Authenticate
+## Create a decision contract
 
-For an interactive local setup:
-
-```bash
-pyjev auth set
-pyjev auth status
-```
-
-For CI, use an environment variable:
-
-```bash
-export TYPESAFE_API_KEY='...'
-```
-
-:::{warning}
-The file fallback is plaintext. Restrictive permissions reduce exposure but do not
-encrypt the credential.
-:::
-
-## First CLI decision
-
-Choice returns a selected label, confidence, and the complete distribution:
-
-```bash
-pyjev choice "Where should this ticket go?" \
-  --state "Stripe checkout fails" \
-  --option billing="Payments and refunds" \
-  --option engineering="Technical failures" \
-  --option sales="Purchasing questions" \
-  --json
-```
-
-`--json` is intended for programs and preserves all result metadata.
-
-## First Python decision
-
-```python
-from pyjev import Jev
-
-with Jev() as jev:
-    result = jev.choice(
-        "Where should this ticket go?",
-        state="Stripe checkout fails",
-        choices={"billing": "Payments", "engineering": "Technical", "sales": "Purchasing"},
-    )
-print(result.value, result.confidence, result.probabilities)
-```
-
-## First named decision
-
-Create `.pyjev.toml`:
+In a project directory, create `.pyjev.toml`:
 
 ```toml
 [pyjev]
@@ -82,11 +34,89 @@ engineering = "Technical problem or product bug"
 sales = "Purchasing, pricing, or procurement question"
 ```
 
-Then run it from the project directory:
+This is a version-controlled specification. It is not a secret store and must
+not contain API keys.
+
+## Inspect before execution
+
+Validation and compilation are local operations:
+
+```bash
+pyjev decision validate
+pyjev decision show ticket-route
+pyjev decision compile ticket-route --state "Stripe webhooks fail"
+```
+
+They do not read credentials, construct a client, or contact the Jev API. The
+compiled output is a normalized request preview with a stable schema marker and
+non-secret decision fingerprint.
+
+## Authenticate
+
+For an interactive local setup, use hidden input:
+
+```bash
+pyjev auth set
+pyjev auth status
+pyjev auth test
+```
+
+For CI, prefer the environment:
+
+```bash
+export TYPESAFE_API_KEY='...'
+pyjev auth test --json
+```
+
+`auth test` performs one minimal request through the official SDK and reports
+safe metadata only. The explicit `auth set --api-key` option is retained for
+compatibility but is unsafe because shell history and process listings may
+expose the value. Do not put secrets in command output, decision files, or
+logs.
+
+:::{warning}
+The file fallback is plaintext. Restrictive permissions reduce exposure but do
+not encrypt the credential.
+:::
+
+## Execute from shell
 
 ```bash
 echo "Stripe webhooks fail" | pyjev decide ticket-route --json
 ```
 
+`--json` preserves result metadata. Use `--value` only when a scalar is safe to
+consume, and use `--min-confidence` when the application requires a confidence
+policy.
+
+## Execute from Python
+
+```python
+from pyjev import Jev
+
+with Jev() as jev:
+    result = jev.decide("ticket-route", state="Stripe webhooks fail")
+
+print(result.value)
+print(result.confidence)
+print(result.probabilities)
+```
+
+For native asynchronous applications:
+
+```python
+from pyjev import AsyncJev
+
+async with AsyncJev() as jev:
+    result = await jev.decide("ticket-route", state="Stripe webhooks fail")
+```
+
+## When to use a direct primitive
+
+Use `jev.choice(...)`, `jev.noul(...)`, or `jev.score(...)` when criteria are
+computed dynamically from deterministic application state. Keep deterministic
+constraints in normal Python; use a named decision when the judgment contract
+is stable and worth reviewing in source control.
+
 Continue with [Named decisions](named-decisions.md), [Confidence](confidence.md),
-[Python API](python-api.md), and [CLI](cli.md).
+[Authentication](authentication.md), and [Python API](python-api.md).

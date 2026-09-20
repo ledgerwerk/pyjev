@@ -54,6 +54,10 @@ Keep these codes stable in scripts.
 
 ## Shell composition
 
+These are pyjev-specific automation codes. They are not interchangeable with
+another `jev` CLI's exit-code taxonomy; in particular, pyjev code `3` means a
+valid Choice/Score result failed the caller's confidence gate.
+
 ```bash
 if TEAM="$(cat ticket.txt | pyjev choice "Route this ticket" \
   --option billing --option engineering --option sales \

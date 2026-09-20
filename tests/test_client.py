@@ -119,6 +119,19 @@ def test_models():
     assert jev.models()[0]["name"] == "jev-test"
 
 
+def test_auth_test_uses_one_minimal_sdk_request():
+    client = FakeClient()
+    result = Jev(client=_as_client(client)).auth_test()
+    assert result.value == 0.91
+    assert len(client.calls) == 1
+    state, questions, model = client.calls[0]
+    assert state == "authentication test"
+    assert model is None
+    question = questions["answer"]
+    assert question.type == "noul"
+    assert question.instructions == "Is this an authentication test?"
+
+
 def test_request_id_is_preserved():
     result = Jev(client=_as_client(FakeClient())).ask("Question?", state="state")
     assert result.request_id == "request-123"

@@ -223,6 +223,13 @@ class Jev:
         response = self._client.models.list()
         return [model.model_dump(mode="json") for model in response.models]
 
+    def auth_test(self) -> NoulResult:
+        """Perform one minimal official-SDK request to verify authentication."""
+        return self.noul(
+            "Is this an authentication test?",
+            state="authentication test",
+        )
+
     def close(self) -> None:
         """Close only a client created by this instance."""
         if self._owns_client:
