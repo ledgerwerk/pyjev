@@ -1,3 +1,8 @@
+[![PyPI - Version](https://img.shields.io/pypi/v/pyjev)](https://pypi.org/project/pyjev/)
+![PyPI - Python Version](https://img.shields.io/pypi/pyversions/pyjev)
+![PyPI - Downloads](https://img.shields.io/pypi/dm/pyjev)
+[![codecov](https://codecov.io/gh/ledgerwerk/pyjev/graph/badge.svg?token=34W6LDpSJB)](https://codecov.io/gh/ledgerwerk/pyjev)
+
 # pyjev
 
 **Confidence-aware Jev decisions for Python, shell, CI, and automation.**

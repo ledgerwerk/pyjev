@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 
 import pytest
@@ -84,7 +85,7 @@ def test_writer_creates_parent_and_uses_single_line_format(monkeypatch, tmp_path
 def test_writer_uses_restrictive_posix_mode(monkeypatch, tmp_path):
     path = set_config_home(monkeypatch, tmp_path)
     credentials.set_file_api_key("file-key")
-    if path.stat().st_mode:
+    if os.name != "nt":
         assert path.stat().st_mode & 0o777 == 0o600
         assert path.parent.stat().st_mode & 0o777 == 0o700
 
