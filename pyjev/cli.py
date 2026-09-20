@@ -480,6 +480,7 @@ def auth_delete() -> None:
     if os.getenv(ENV_NAME) is not None:
         typer.echo(f"{ENV_NAME} is still set and remains the active credential.")
 
+
 @decision_app.command("list")
 def decision_list(
     config: Path | None = typer.Option(None, "--config", help="Path to a .pyjev.toml file."),

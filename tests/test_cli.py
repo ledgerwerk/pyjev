@@ -90,6 +90,7 @@ def test_auth_set_explicit_key_after_keyring_failure_never_confirms(monkeypatch)
         "set_api_key",
         lambda key: (_ for _ in ()).throw(CredentialError("keyring unavailable")),
     )
+
     def fail_confirm(*args, **kwargs):
         raise AssertionError("unexpected confirmation")
 
@@ -161,9 +162,7 @@ def test_auth_status_handles_credential_file_error(monkeypatch):
     monkeypatch.setattr(
         cli,
         "credential_source",
-        lambda: (_ for _ in ()).throw(
-            CredentialError("Could not read credential file /tmp/x: denied")
-        ),
+        lambda: (_ for _ in ()).throw(CredentialError("Could not read credential file /tmp/x: denied")),
     )
 
     result = runner.invoke(app, ["auth", "status"])

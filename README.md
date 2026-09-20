@@ -112,12 +112,12 @@ Noul has a probability of true rather than a Choice/Score confidence, so `--min-
 
 ### Exit codes
 
-| Exit | Meaning                                                                            |
-| ---: | ---------------------------------------------------------------------------------- |
-|    0 | Successful result and any confidence gate passed                                   |
+| Exit | Meaning                                                                                             |
+| ---: | --------------------------------------------------------------------------------------------------- |
+|    0 | Successful result and any confidence gate passed                                                    |
 |    1 | Runtime failure: credentials, keyring, credential-file, TypeSafe API, network, or configuration I/O |
-|    2 | CLI usage or local argument validation error                                       |
-|    3 | Valid Choice/Score result obtained, but confidence gate failed                     |
+|    2 | CLI usage or local argument validation error                                                        |
+|    3 | Valid Choice/Score result obtained, but confidence gate failed                                      |
 
 Expected TypeSafe failures are concise and do not print tracebacks by default.
 

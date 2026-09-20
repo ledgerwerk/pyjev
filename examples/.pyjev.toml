@@ -9,8 +9,13 @@ chocolate = "A morale boost for the person holding the pager"
 
 [decision.haunted-ci]
 type = "score"
-question = "How urgent is this haunted CI failure?"
-levels = ["monitor", "investigate", "interrupt someone", "wake the release manager"]
+question = "How urgently should the team respond to this suspicious CI failure?"
+levels = [
+  "Monitor: probably transient and not blocking; retry and keep working.",
+  "Investigate: suspicious or recurring; inspect logs soon, but nobody needs interrupting.",
+  "Interrupt someone: the release is blocked or repeated failures need an engineer now.",
+  "Wake the release manager: release emergency with no safe workaround; page immediately.",
+]
 
 [decision.meeting-escape]
 type = "noul"
