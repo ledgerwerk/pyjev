@@ -1,3 +1,6 @@
+[pyjev]
+schema = 1
+
 [decision.emergency-snack]
 type = "choice"
 question = "Which snack should the on-call engineer bring to the emergency room?"

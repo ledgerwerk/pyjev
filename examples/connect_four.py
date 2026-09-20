@@ -1,6 +1,5 @@
 """Play Connect Four against Jev with exact bounded tactical proofs."""
 
-
 import argparse
 import json
 from dataclasses import dataclass, field
@@ -69,9 +68,7 @@ class TacticalSelection:
             "candidates": [column + 1 for column in self.candidates],
             "reason": self.reason,
             "constraints": list(self.constraints),
-            "rejected": {
-                str(column + 1): list(reasons) for column, reasons in sorted(self.rejected.items())
-            },
+            "rejected": {str(column + 1): list(reasons) for column, reasons in sorted(self.rejected.items())},
         }
 
 
@@ -330,8 +327,7 @@ def scan_tactics(board: list[list[str]], piece: str, opponent: str) -> TacticalS
 
     analyses = {column: analyze_move(board, column, piece, opponent) for column in legal}
     forcing_proofs = {
-        column: opponent_forcing_replies(board, column, piece=piece, opponent=opponent)
-        for column in legal
+        column: opponent_forcing_replies(board, column, piece=piece, opponent=opponent) for column in legal
     }
     immediate_wins = winning_columns(board, piece)
     if immediate_wins:
@@ -358,16 +354,10 @@ def scan_tactics(board: list[list[str]], piece: str, opponent: str) -> TacticalS
         constraints.append("avoid-immediate-loss")
 
     forcing_wins = [
-        column
-        for column in safe
-        if move_forces_win_next_turn(board, column, piece=piece, opponent=opponent)
+        column for column in safe if move_forces_win_next_turn(board, column, piece=piece, opponent=opponent)
     ]
     if forcing_wins:
-        rejected = {
-            column: ["not-a-proven-forcing-win"]
-            for column in safe
-            if column not in forcing_wins
-        }
+        rejected = {column: ["not-a-proven-forcing-win"] for column in safe if column not in forcing_wins}
         return TacticalSelection(
             legal,
             forcing_wins,
@@ -448,10 +438,7 @@ def build_jev_state(
     """Build exact tactical state supplied to Jev."""
     selection = selection or scan_tactics(board, piece, opponent)
     legal = selection.legal_columns
-    analyses = {
-        str(column + 1): selection.analyses[column]
-        for column in legal
-    }
+    analyses = {str(column + 1): selection.analyses[column] for column in legal}
     active_name = player.name if player else ("Jev" if piece == JEV_PIECE else "Jev-X")
     other_name = opponent_player.name if opponent_player else ("human" if opponent == HUMAN else "Jev-O")
     strategy = player.strategy if player else "balanced"
@@ -478,9 +465,7 @@ def build_jev_state(
             "constraints_applied": list(selection.constraints),
             "candidate_reason": candidate_reason,
             "candidate_columns": [column + 1 for column in candidate_columns],
-            "rejected_columns": {
-                str(column + 1): reasons for column, reasons in sorted(selection.rejected.items())
-            },
+            "rejected_columns": {str(column + 1): reasons for column, reasons in sorted(selection.rejected.items())},
         },
         "move_analysis": analyses,
         "rules": [
@@ -616,6 +601,7 @@ def winning_columns_from_selection(selection: TacticalSelection, side: str) -> l
     if side == "own":
         return _analysis_winning_columns(selection, "wins_now")
     return _analysis_winning_columns(selection, "allows_immediate_loss")
+
 
 def _analysis_winning_columns(selection: TacticalSelection, key: str) -> list[int]:
     """Internal compatibility helper for compact terminal output."""

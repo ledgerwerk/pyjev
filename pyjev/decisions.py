@@ -6,7 +6,7 @@ import json
 import os
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeAlias
 
 try:  # Python 3.11+
     import tomllib
@@ -24,6 +24,8 @@ class DecisionConfigNotFound(DecisionConfigError):
 
 @dataclass(frozen=True, slots=True)
 class NoulDecision:
+    """A named yes/no probability declaration."""
+
     name: str
     question: str
     true: Any | None = None
@@ -33,6 +35,8 @@ class NoulDecision:
 
 @dataclass(frozen=True, slots=True)
 class ChoiceDecision:
+    """A named closed-set Choice declaration."""
+
     name: str
     question: str
     options: dict[str, Any | None]
@@ -41,13 +45,36 @@ class ChoiceDecision:
 
 @dataclass(frozen=True, slots=True)
 class ScoreDecision:
+    """A named ordered Score declaration."""
+
     name: str
     question: str
     levels: tuple[Any, ...]
     model: str | None = None
 
 
-Decision = NoulDecision | ChoiceDecision | ScoreDecision
+PrimitiveDecision: TypeAlias = NoulDecision | ChoiceDecision | ScoreDecision
+
+
+@dataclass(frozen=True, slots=True)
+class BundleDecision:
+    """A named set of independent primitive questions sharing one state and model."""
+
+    name: str
+    questions: dict[str, PrimitiveDecision]
+    model: str | None = None
+
+
+Decision: TypeAlias = PrimitiveDecision | BundleDecision
+
+
+@dataclass(frozen=True, slots=True)
+class DecisionConfig:
+    """Validated decision configuration and its effective schema version."""
+
+    path: Path
+    schema: int
+    decisions: dict[str, Decision]
 
 
 def find_config(
@@ -123,25 +150,30 @@ def _check_fields(table: dict[str, Any], allowed: set[str], path: Path, name: st
         raise _error(path, name, unknown[0], "unknown field")
 
 
-def _parse_decision(name: str, raw: Any, path: Path) -> Decision:
-    if not isinstance(name, str) or not name.strip():
-        raise _error(path, name, "name", "must be a nonempty string")
-    table = _require_table(raw, path, name, "decision")
+def _parse_primitive(name: str, table: dict[str, Any], path: Path, *, allow_model: bool = True) -> PrimitiveDecision:
     kind = table.get("type")
     if kind not in {"noul", "choice", "score"}:
         raise _error(path, name, "type", "must be exactly noul, choice, or score")
+    if not allow_model and "model" in table:
+        raise _error(path, name, "model", "child model overrides are not allowed in a bundle")
     question = _question(table, path, name)
-    model = _model(table, path, name)
+    model = _model(table, path, name) if allow_model else None
 
     if kind == "noul":
-        _check_fields(table, {"type", "question", "true", "false", "model"}, path, name)
+        allowed = {"type", "question", "true", "false"}
+        if allow_model:
+            allowed.add("model")
+        _check_fields(table, allowed, path, name)
         for field in ("true", "false"):
             if field in table and not _json_compatible(table[field]):
                 raise _error(path, name, field, "must be JSON-compatible")
         return NoulDecision(name=name, question=question, true=table.get("true"), false=table.get("false"), model=model)
 
     if kind == "choice":
-        _check_fields(table, {"type", "question", "options", "model"}, path, name)
+        allowed = {"type", "question", "options"}
+        if allow_model:
+            allowed.add("model")
+        _check_fields(table, allowed, path, name)
         options = table.get("options")
         if not isinstance(options, dict):
             raise _error(path, name, "options", "must be a TOML table")
@@ -151,14 +183,15 @@ def _parse_decision(name: str, raw: Any, path: Path) -> Decision:
         for label, description in options.items():
             if not isinstance(label, str) or not label.strip():
                 raise _error(path, name, "options", "labels must be nonempty strings")
-            if label in parsed_options:
-                raise _error(path, name, "options", f"duplicate label {label!r}")
             if not _json_compatible(description):
                 raise _error(path, name, f"options.{label}", "must be JSON-compatible")
             parsed_options[label] = description
         return ChoiceDecision(name=name, question=question, options=parsed_options, model=model)
 
-    _check_fields(table, {"type", "question", "levels", "model"}, path, name)
+    allowed = {"type", "question", "levels"}
+    if allow_model:
+        allowed.add("model")
+    _check_fields(table, allowed, path, name)
     levels = table.get("levels")
     if not isinstance(levels, list):
         raise _error(path, name, "levels", "must be an array")
@@ -169,8 +202,44 @@ def _parse_decision(name: str, raw: Any, path: Path) -> Decision:
     return ScoreDecision(name=name, question=question, levels=tuple(levels), model=model)
 
 
-def load_decisions(config: str | Path | None = None) -> dict[str, Decision]:
-    """Load and strictly validate every named decision in a config file."""
+def _parse_decision(name: str, raw: Any, path: Path) -> Decision:
+    if not isinstance(name, str) or not name.strip():
+        raise _error(path, name, "name", "must be a nonempty string")
+    table = _require_table(raw, path, name, "decision")
+    kind = table.get("type")
+    if kind == "bundle":
+        _check_fields(table, {"type", "questions", "model"}, path, name)
+        raw_questions = table.get("questions")
+        if not isinstance(raw_questions, dict) or not raw_questions:
+            raise _error(path, name, "questions", "must be a nonempty TOML table")
+        questions: dict[str, PrimitiveDecision] = {}
+        for question_name, raw_question in raw_questions.items():
+            if not isinstance(question_name, str) or not question_name.strip():
+                raise _error(path, name, "questions", "keys must be nonempty strings")
+            question_table = _require_table(raw_question, path, f"{name}.{question_name}", "question")
+            questions[question_name] = _parse_primitive(question_name, question_table, path, allow_model=False)
+        return BundleDecision(name=name, questions=questions, model=_model(table, path, name))
+    if kind not in {"noul", "choice", "score"}:
+        raise _error(path, name, "type", "must be exactly noul, choice, score, or bundle")
+    return _parse_primitive(name, table, path)
+
+
+def _schema(document: dict[str, Any], path: Path) -> int:
+    raw_metadata = document.get("pyjev")
+    if raw_metadata is None:
+        return 1
+    metadata = _require_table(raw_metadata, path, None, "pyjev")
+    _check_fields(metadata, {"schema"}, path, "pyjev")
+    value = metadata.get("schema", 1)
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise _error(path, None, "pyjev.schema", "must be an integer")
+    if value != 1:
+        raise _error(path, None, "pyjev.schema", "unsupported schema; supported schemas: 1")
+    return value
+
+
+def load_config(config: str | Path | None = None) -> DecisionConfig:
+    """Load and strictly validate a complete decision configuration."""
     path = find_config(config)
     try:
         with path.open("rb") as stream:
@@ -179,7 +248,10 @@ def load_decisions(config: str | Path | None = None) -> dict[str, Decision]:
         raise DecisionConfigError(f"Could not read decision config {path}: {exc}") from exc
     except tomllib.TOMLDecodeError as exc:
         raise DecisionConfigError(f"{path}: invalid TOML: {exc}") from exc
+    if not isinstance(document, dict):
+        raise DecisionConfigError(f"{path}: expected a TOML document")
 
+    schema = _schema(document, path)
     raw_decisions = document.get("decision")
     if not isinstance(raw_decisions, dict):
         raise DecisionConfigError(f"{path}: decision: expected a TOML table")
@@ -188,29 +260,35 @@ def load_decisions(config: str | Path | None = None) -> dict[str, Decision]:
         if name in decisions:
             raise _error(path, name, "name", "duplicate decision name")
         decisions[name] = _parse_decision(name, raw, path)
-    return decisions
+    return DecisionConfig(path=path, schema=schema, decisions=decisions)
+
+
+def load_decisions(config: str | Path | None = None) -> dict[str, Decision]:
+    """Load every named decision after validating the complete configuration."""
+    return load_config(config).decisions
 
 
 def load_decision(name: str, config: str | Path | None = None) -> Decision:
     """Load one named decision after validating the complete configuration."""
     if not isinstance(name, str) or not name.strip():
         raise DecisionConfigError("Decision name must be a nonempty string.")
-    decisions = load_decisions(config)
+    loaded = load_config(config)
     try:
-        return decisions[name]
+        return loaded.decisions[name]
     except KeyError as exc:
-        path = find_config(config)
-        raise DecisionConfigError(f"{path}: decision {name!r}: not found") from exc
+        raise DecisionConfigError(f"{loaded.path}: decision {name!r}: not found") from exc
 
 
 def decision_to_dict(decision: Decision) -> dict[str, Any]:
     """Return a JSON-serializable representation for CLI output."""
-    if isinstance(decision, NoulDecision):
-        result: dict[str, Any] = {
+    if isinstance(decision, BundleDecision):
+        result = {
             "name": decision.name,
-            "type": "noul",
-            "question": decision.question,
+            "type": "bundle",
+            "questions": {name: decision_to_dict(question) for name, question in decision.questions.items()},
         }
+    elif isinstance(decision, NoulDecision):
+        result = {"name": decision.name, "type": "noul", "question": decision.question}
         if decision.true is not None:
             result["true"] = decision.true
         if decision.false is not None:

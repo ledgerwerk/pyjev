@@ -325,7 +325,6 @@ def test_v3_single_deep_candidate_skips_jev(connect_four: ModuleType) -> None:
     jev.choice.assert_not_called()
 
 
-
 def test_mechanics_cover_gravity_full_columns_and_win_directions(connect_four: ModuleType) -> None:
     board = connect_four.new_board()
     assert connect_four.drop_piece(board, 0, connect_four.HUMAN) == 5

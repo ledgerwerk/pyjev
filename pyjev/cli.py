@@ -21,6 +21,7 @@ from typesafe_sdk import (
 
 from . import __version__
 from .client import Jev
+from .compile import compile_decision
 from .credentials import (
     ENV_NAME,
     CredentialError,
@@ -31,14 +32,15 @@ from .credentials import (
     set_file_api_key,
 )
 from .decisions import (
+    BundleDecision,
     DecisionConfigError,
     NoulDecision,
     decision_to_dict,
-    find_config,
+    load_config,
     load_decision,
     load_decisions,
 )
-from .results import ChoiceResult, NoulResult, ScoreResult
+from .results import BundleResult, ChoiceResult, NoulResult, ScoreResult
 
 EXIT_OK = 0
 EXIT_RUNTIME_ERROR = 1
@@ -46,7 +48,7 @@ EXIT_USAGE = 2
 EXIT_CONFIDENCE = 3
 
 T = TypeVar("T")
-Result = NoulResult | ChoiceResult | ScoreResult
+Result = BundleResult | NoulResult | ChoiceResult | ScoreResult
 
 app = typer.Typer(
     no_args_is_help=True,
@@ -123,6 +125,13 @@ def _emit_result(result: Result, *, json_output: bool, value_only: bool) -> None
     _validate_output_options(json_output=json_output, value_only=value_only)
     if json_output:
         _print_json(result.to_dict())
+        return
+    if isinstance(result, BundleResult):
+        if value_only:
+            raise typer.BadParameter("--value is not valid for bundle decisions.")
+        for name, answer in result.answers.items():
+            typer.echo(f"[{name}]")
+            _emit_result(answer, json_output=False, value_only=False)
         return
     if value_only:
         typer.echo(result.value)
@@ -367,8 +376,12 @@ def decide(
         declaration = load_decision(name, config)
     except DecisionConfigError as exc:
         raise _parse_decision_error(exc) from exc
-    if isinstance(declaration, NoulDecision) and min_confidence is not None:
+    if isinstance(declaration, (NoulDecision, BundleDecision)) and min_confidence is not None:
+        if isinstance(declaration, BundleDecision):
+            raise typer.BadParameter("--min-confidence is not valid for bundle decisions.")
         raise typer.BadParameter("--min-confidence is only valid for named Choice and Score decisions.")
+    if isinstance(declaration, BundleDecision) and value_only:
+        raise typer.BadParameter("--value is not valid for bundle decisions.")
     value = _state_value(state, state_file, state_json)
     result = _named_decision_result(name, state=value, config=str(config) if config else None, model=model)
     _emit_gated_result(
@@ -512,19 +525,48 @@ def decision_show(
     else:
         typer.echo(f"name={decision.name}")
         typer.echo(f"type={type(decision).__name__.removesuffix('Decision').lower()}")
-        typer.echo(f"question={decision.question}")
+        if isinstance(decision, BundleDecision):
+            typer.echo(f"questions={','.join(decision.questions)}")
+        else:
+            typer.echo(f"question={decision.question}")
 
 
 @decision_app.command("validate")
 def decision_validate(
     config: Path | None = typer.Option(None, "--config", help="Path to a .pyjev.toml file."),
+    json_output: bool = typer.Option(False, "--json", help="Emit JSON."),
 ) -> None:
     try:
-        path = find_config(config)
-        decisions = load_decisions(config)
+        loaded = load_config(config)
     except DecisionConfigError as exc:
         raise _parse_decision_error(exc) from exc
-    typer.echo(f"Valid {path}: {len(decisions)} decisions")
+    if json_output:
+        _print_json(
+            {
+                "config": str(loaded.path),
+                "schema": loaded.schema,
+                "decisions": [decision_to_dict(decision) for decision in loaded.decisions.values()],
+            }
+        )
+        return
+    typer.echo(f"Valid {loaded.path}: schema {loaded.schema}; {len(loaded.decisions)} decisions")
+
+
+@decision_app.command("compile")
+def decision_compile(
+    name: str = typer.Argument(..., help="Name declared in .pyjev.toml."),
+    state: str | None = typer.Option(None, "--state", "-s", help="State text."),
+    state_file: Path | None = typer.Option(None, "--state-file", help="Read state from a file."),
+    state_json: bool = typer.Option(False, "--state-json", help="Decode the state as JSON."),
+    model: str | None = typer.Option(None, "--model", help="Override the decision's model."),
+    config: Path | None = typer.Option(None, "--config", help="Path to a .pyjev.toml file."),
+) -> None:
+    value = _state_value(state, state_file, state_json)
+    try:
+        compiled = compile_decision(name, state=value, config=config, model=model)
+    except DecisionConfigError as exc:
+        raise _parse_decision_error(exc) from exc
+    _print_json(compiled.to_dict())
 
 
 @app.command("run")

@@ -10,6 +10,7 @@ from pyjev.decisions import (
     NoulDecision,
     ScoreDecision,
     find_config,
+    load_config,
     load_decision,
     load_decisions,
 )
@@ -107,3 +108,28 @@ def test_cardinality_is_validated_locally(tmp_path: Path, kind: str, field: str)
 def test_missing_config_error_mentions_override() -> None:
     with pytest.raises(DecisionConfigError, match=r"\.pyjev\.toml|--config"):
         find_config(start="/")
+
+
+def test_explicit_schema_one_is_recorded(tmp_path: Path) -> None:
+    path = write_config(tmp_path, "[pyjev]\nschema = 1\n[decision.one]\ntype='noul'\nquestion='One'\n")
+    loaded = load_config(path)
+    assert loaded.schema == 1
+    assert loaded.path == path.resolve()
+
+
+def test_missing_schema_is_implicit_schema_one(tmp_path: Path) -> None:
+    path = write_config(tmp_path, "[decision.one]\ntype='noul'\nquestion='One'\n")
+    assert load_config(path).schema == 1
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "[pyjev]\nschema = 2\n[decision.one]\ntype='noul'\nquestion='One'\n",
+        "[pyjev]\nschema = '1'\n[decision.one]\ntype='noul'\nquestion='One'\n",
+        "[pyjev]\nunknown = true\n[decision.one]\ntype='noul'\nquestion='One'\n",
+    ],
+)
+def test_invalid_schema_is_rejected_before_decisions(tmp_path: Path, text: str) -> None:
+    with pytest.raises(DecisionConfigError, match=r"schema|unknown"):
+        load_decisions(write_config(tmp_path, text))

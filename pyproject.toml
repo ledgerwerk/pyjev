@@ -38,6 +38,11 @@ dev = [
   "build>=1,<2",
   "twine>=6,<7",
 ]
+docs = [
+  "sphinx>=7,<9",
+  "myst-parser>=2,<5",
+  "sphinx-rtd-theme>=2,<4",
+]
 
 [project.scripts]
 pyjev = "pyjev.cli:app"
@@ -46,7 +51,7 @@ pyjev = "pyjev.cli:app"
 Homepage = "https://github.com/ledgerwerk/pyjev"
 Repository = "https://github.com/ledgerwerk/pyjev"
 Issues = "https://github.com/ledgerwerk/pyjev/issues"
-Documentation = "https://docs.typesafe.ai/"
+"TypeSafe Jev Documentation" = "https://docs.typesafe.ai/"
 
 [tool.setuptools.packages.find]
 where = ["."]
