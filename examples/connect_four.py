@@ -4,6 +4,7 @@ import argparse
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import cast
 
 from pyjev import ChoiceResult, Jev
 
@@ -336,13 +337,13 @@ def scan_tactics(board: list[list[str]], piece: str, opponent: str) -> TacticalS
     safe = [column for column in legal if not analyses[column]["opponent_winning_replies"]]
     opponent_wins_now = winning_columns(board, opponent)
     if not safe:
-        rejected = {column: ["immediate-opponent-win"] for column in legal}
+        forced_rejected = {column: ["immediate-opponent-win"] for column in legal}
         return TacticalSelection(
             legal,
             legal,
             "forced-loss-or-no-safe-one-ply-move",
             [],
-            rejected,
+            forced_rejected,
             analyses,
             forcing_proofs,
         )
@@ -369,12 +370,12 @@ def scan_tactics(board: list[list[str]], piece: str, opponent: str) -> TacticalS
         )
 
     deep_safe = [column for column in safe if not forcing_proofs[column]]
-    rejected: dict[int, list[str]] = {}
+    deep_rejected: dict[int, list[str]] = {}
     for column in legal:
         if column not in safe:
-            rejected[column] = ["immediate-opponent-win"]
+            deep_rejected[column] = ["immediate-opponent-win"]
         elif column not in deep_safe:
-            rejected[column] = ["opponent-forcing-reply"]
+            deep_rejected[column] = ["opponent-forcing-reply"]
 
     if deep_safe and len(deep_safe) < len(safe):
         return TacticalSelection(
@@ -382,7 +383,7 @@ def scan_tactics(board: list[list[str]], piece: str, opponent: str) -> TacticalS
             deep_safe,
             "avoid-forced-loss-next-turn",
             constraints + ["avoid-forced-loss-next-turn"],
-            rejected,
+            deep_rejected,
             analyses,
             forcing_proofs,
         )
@@ -392,7 +393,7 @@ def scan_tactics(board: list[list[str]], piece: str, opponent: str) -> TacticalS
             safe,
             "forced-loss-next-turn-or-no-deep-safe-move",
             constraints,
-            {column: reasons for column, reasons in rejected.items() if column not in safe},
+            {column: reasons for column, reasons in deep_rejected.items() if column not in safe},
             analyses,
             forcing_proofs,
         )
@@ -400,7 +401,7 @@ def scan_tactics(board: list[list[str]], piece: str, opponent: str) -> TacticalS
         reason = "forced-defense" if opponent_wins_now else "avoid-immediate-loss"
     else:
         reason = "strategic-choice"
-    return TacticalSelection(legal, deep_safe, reason, constraints, rejected, analyses, forcing_proofs)
+    return TacticalSelection(legal, deep_safe, reason, constraints, deep_rejected, analyses, forcing_proofs)
 
 
 def tactical_candidates(
@@ -607,7 +608,13 @@ def _analysis_winning_columns(selection: TacticalSelection, key: str) -> list[in
     """Internal compatibility helper for compact terminal output."""
     if key == "wins_now":
         return [column + 1 for column, analysis in selection.analyses.items() if analysis["wins_now"]]
-    return sorted({reply for analysis in selection.analyses.values() for reply in analysis["opponent_winning_replies"]})
+    return sorted(
+        {
+            reply
+            for analysis in selection.analyses.values()
+            for reply in cast(list[int], analysis["opponent_winning_replies"])
+        }
+    )
 
 
 def print_tactical_debug(
@@ -635,12 +642,12 @@ def print_tactical_debug(
         analysis = selection.analyses[column]
         print(f"\ncandidate {column + 1}:")
         print(f"  wins now: {'yes' if analysis['wins_now'] else 'no'}")
-        immediate = analysis["opponent_winning_replies"]
+        immediate = cast(list[int], analysis["opponent_winning_replies"])
         print("  opponent immediate wins after move: " + (" ".join(map(str, immediate)) or "none"))
         forcing = selection.forcing_reply_proofs.get(column, {})
         if forcing:
             formatted = " ".join(
-                f"{reply + 1}->[{', '.join(map(str, proof['opponent_winning_columns_next']))}]"
+                f"{reply + 1}->[{', '.join(map(str, cast(list[int], proof['opponent_winning_columns_next'])))}]"
                 for reply, proof in sorted(forcing.items())
             )
             print(f"  forcing opponent replies (opponent forcing replies): {formatted}")
@@ -665,25 +672,28 @@ def print_forcing_proof(candidate: int, reply: int, proof: dict[str, object]) ->
     """Print one exact candidate -> reply -> response proof."""
     print(f"\nproof: candidate {candidate + 1} -> opponent reply {reply + 1}")
     print("board after opponent reply:")
-    for row in proof["board_after_reply"]:
+    board_after_reply = cast(list[str], proof["board_after_reply"])
+    for row in board_after_reply:
         print("  " + " ".join(row))
-    print(
-        "opponent immediate winning columns next: "
-        + (" ".join(map(str, proof["opponent_winning_columns_next"])) or "none")
-    )
+    next_wins = cast(list[int], proof["opponent_winning_columns_next"])
+    escape_responses = cast(list[int], proof["escape_responses"])
+    forces_loss = cast(bool, proof["forces_loss_next_turn"])
+    print("opponent immediate winning columns next: " + (" ".join(map(str, next_wins)) or "none"))
     print("our legal responses:")
-    response_analysis = proof["response_analysis"]
-    for response, details in response_analysis.items():
-        if details["wins_now"]:
+    response_analysis = cast(dict[str, dict[str, object]], proof["response_analysis"])
+    for response, raw_details in response_analysis.items():
+        details = raw_details
+        wins_now = cast(bool, details["wins_now"])
+        if wins_now:
             print(f"  {response} -> own immediate win (escape)")
         else:
-            wins = details["opponent_winning_replies"]
+            wins = cast(list[int], details["opponent_winning_replies"])
             print(f"  {response} -> opponent still wins: " + (" ".join(map(str, wins)) or "none"))
-    print("escape responses: " + (" ".join(map(str, proof["escape_responses"])) or "none"))
+    print("escape responses: " + (" ".join(map(str, escape_responses)) or "none"))
     print(
         "proof result: opponent reply "
         + str(reply + 1)
-        + (" forces loss next turn" if proof["forces_loss_next_turn"] else " is not forcing")
+        + (" forces loss next turn" if forces_loss else " is not forcing")
     )
 
 

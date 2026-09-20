@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from types import TracebackType
-from typing import Any
+from typing import Any, overload
 
 from typesafe_sdk import AsyncTypeSafeClient, Question, TypeSafeClient
 
@@ -26,6 +26,14 @@ def _request_id(response: Any) -> str | None:
 
 def _usage(response: Any) -> dict[str, Any]:
     return response.usage.model_dump(mode="json")
+
+
+@overload
+def _primitive_result(response: Any, name: str, decision: NoulDecision) -> NoulResult: ...
+@overload
+def _primitive_result(response: Any, name: str, decision: ChoiceDecision) -> ChoiceResult: ...
+@overload
+def _primitive_result(response: Any, name: str, decision: ScoreDecision) -> ScoreResult: ...
 
 
 def _primitive_result(
@@ -126,7 +134,7 @@ class Jev:
             questions={"answer": build_noul(question, true=true, false=false)},
             model=model,
         )
-        return _primitive_result(response, "answer", NoulDecision("answer", str(question), true, false, model))  # type: ignore[arg-type]
+        return _primitive_result(response, "answer", NoulDecision("answer", str(question), true, false, model))
 
     def choice(
         self,
@@ -160,7 +168,7 @@ class Jev:
             questions={"answer": build_score(question, values)},
             model=model,
         )
-        return _primitive_result(response, "answer", ScoreDecision("answer", str(question), tuple(values)))  # type: ignore[arg-type]
+        return _primitive_result(response, "answer", ScoreDecision("answer", str(question), tuple(values)))
 
     def decide(
         self,

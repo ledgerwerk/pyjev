@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import asyncio
 from types import SimpleNamespace
+from typing import cast
+
+from typesafe_sdk import AsyncTypeSafeClient
 
 from pyjev import AsyncJev
 
@@ -47,10 +50,14 @@ class AsyncClient:
         self.closed = True
 
 
+def _as_client(client: AsyncClient) -> AsyncTypeSafeClient:
+    return cast(AsyncTypeSafeClient, client)
+
+
 def test_async_choice_uses_native_async_client():
     async def run() -> None:
         client = AsyncClient()
-        jev = AsyncJev(client=client)
+        jev = AsyncJev(client=_as_client(client))
         result = await jev.choice("Choose", state="state", choices=["yes", "no"])
         assert result.value == "yes"
         assert len(client.calls) == 1

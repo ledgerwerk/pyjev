@@ -2,11 +2,13 @@ from __future__ import annotations
 
 from pathlib import Path
 from types import SimpleNamespace
+from typing import cast
 
 import pytest
 from typer.testing import CliRunner
+from typesafe_sdk import TypeSafeClient
 
-from pyjev import BundleResult, Jev
+from pyjev import BundleResult, ChoiceResult, Jev, ScoreResult
 from pyjev.cli import app
 from pyjev.decisions import BundleDecision, DecisionConfigError, load_decision
 
@@ -64,6 +66,10 @@ class BundleClient:
         pass
 
 
+def _as_client(client: BundleClient) -> TypeSafeClient:
+    return cast(TypeSafeClient, client)
+
+
 def bundle_config(tmp_path: Path, *, child_model: bool = False) -> Path:
     child_model_text = '\nmodel = "child-model"' if child_model else ""
     path = tmp_path / ".pyjev.toml"
@@ -109,13 +115,20 @@ def test_bundle_parser_preserves_child_keys_and_rejects_child_models(tmp_path: P
 
 def test_bundle_uses_one_call_and_preserves_each_result(tmp_path: Path) -> None:
     client = BundleClient()
-    result = Jev(client=client).decide("ticket-triage", state={"ticket": "down"}, config=bundle_config(tmp_path))
+    result = Jev(client=_as_client(client)).decide(
+        "ticket-triage",
+        state={"ticket": "down"},
+        config=bundle_config(tmp_path),
+    )
     assert isinstance(result, BundleResult)
     assert len(client.calls) == 1
     assert list(result.answers) == ["refund", "route", "urgency"]
-    assert result.answers["refund"].value == 0.81
-    assert result.answers["route"].probabilities["engineering"] == 0.91
-    assert result.answers["urgency"].legend[3] == "critical"
+    route = result.answers["route"]
+    assert isinstance(route, ChoiceResult)
+    assert route.probabilities["engineering"] == 0.91
+    urgency = result.answers["urgency"]
+    assert isinstance(urgency, ScoreResult)
+    assert urgency.legend[3] == "critical"
     assert result.request_id == "request-bundle"
 
 

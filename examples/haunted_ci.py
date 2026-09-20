@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from pyjev import Jev
+from pyjev import Jev, ScoreResult
 
 CONFIG = Path(__file__).with_name(".pyjev.toml")
 DECISION = "haunted-ci"
@@ -43,6 +43,8 @@ def main() -> None:
             config=CONFIG,
         )
 
+        if not isinstance(result, ScoreResult):
+            raise TypeError(f"Expected a ScoreResult, got {type(result).__name__}")
     print("\nStructured result:")
     print(f"  score       {result.value:.2f}")
     print(f"  confidence  {result.confidence:.2f}")

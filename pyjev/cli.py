@@ -184,6 +184,9 @@ def _emit_gated_result(
     if isinstance(result, NoulResult):
         _emit_result(result, json_output=json_output, value_only=value_only)
         return
+    if isinstance(result, BundleResult):
+        _emit_result(result, json_output=json_output, value_only=value_only)
+        return
     if minimum is not None and _gate_failed(result.confidence, minimum):
         _emit_gate_failure(result, minimum=minimum, json_output=json_output)
     _emit_result(result, json_output=json_output, value_only=value_only)

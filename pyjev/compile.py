@@ -94,10 +94,17 @@ class CompiledDecision:
             },
             "request": {
                 "state": self.state,
-                "questions": {name: question.model_dump(mode="json") for name, question in self.questions.items()},
+                "questions": {name: _question_to_dict(question) for name, question in self.questions.items()},
                 "model": self.model,
             },
         }
+
+
+def _question_to_dict(question: Question) -> dict[str, Any]:
+    """Serialize either an SDK question model or its raw dictionary form."""
+    if isinstance(question, (Noul, Choice, Score)):
+        return question.model_dump(mode="json")
+    return dict(question)
 
 
 def compile_decision(
