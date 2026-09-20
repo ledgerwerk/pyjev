@@ -109,7 +109,8 @@ def _state_value(state: str | None, state_file: Path | None, state_json: bool) -
 
 def _validate_output_options(*, json_output: bool, value_only: bool) -> None:
     if json_output and value_only:
-        raise typer.BadParameter("Use either --json or --value, not both.")
+        typer.echo("Error: Use either --json or --value, not both.", err=True)
+        raise typer.Exit(code=EXIT_USAGE)
 
 
 def _validate_min_confidence(value: float | None) -> None:
