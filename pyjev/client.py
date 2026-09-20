@@ -7,7 +7,7 @@ from pathlib import Path
 from types import TracebackType
 from typing import Any
 
-from typesafe_sdk import Choice, Noul, Question, Score, TypeSafeClient
+from typesafe_sdk import Choice, Noul, NoulCriteria, Question, Score, TypeSafeClient
 
 from .credentials import get_api_key
 from .results import ChoiceResult, NoulResult, ScoreResult
@@ -99,7 +99,7 @@ class Jev:
         false: Any | None = None,
         model: str | None = None,
     ) -> NoulResult:
-        criteria = None
+        criteria: NoulCriteria | None = None
         if true is not None or false is not None:
             criteria = {"true": true, "false": false}
 
