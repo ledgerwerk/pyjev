@@ -8,6 +8,7 @@ Set `TYPESAFE_API_KEY` or run `pyjev auth set`, then run from the repository roo
 ```bash
 python examples/emergency_snack.py
 python examples/haunted_ci.py
+python examples/connect_four.py
 ```
 
 Jev evaluates **state + a typed question** and returns structured data rather than
@@ -21,7 +22,12 @@ free-form text.
   that a Score can be fractional, prints the ordered legend and level probabilities,
   and demonstrates how ordinary Python can decline to act when confidence is low.
 
-The examples intentionally show the boundary between Jev/TypeSafe and pyjev:
+- `connect_four.py` is an interactive game against Jev. The board and rules are
+  structured state, and every Jev turn is a direct dynamic `Choice` whose options
+  are only the currently legal columns. Python enforces gravity, legal moves, wins,
+  and draws; Jev chooses among the valid actions. The terminal also prints Jev's
+  confidence and complete move probability distribution.
+  The examples intentionally show the boundary between Jev/TypeSafe and pyjev:
 
 - TypeSafe supplies state evaluation, Choice and Score semantics, the selected answer
   or score, probabilities, confidence, and model response metadata.
@@ -36,6 +42,12 @@ a program can automate a low-stakes action when confidence clears its threshold 
 otherwise leave the decision to a human. Confidence is separate from the selected
 option's probability and should not be described as the probability that an answer is
 correct.
+
+Connect Four deliberately does not confidence-gate Jev's move. Low confidence is
+shown to the player, but Jev still has to choose a legal move because uncertainty
+is part of the game.
+
+Do not put this decision in `.pyjev.toml`; its options are dynamic.
 
 For the Score example, the numeric result is the probability-weighted position over
 ordered levels, so a fractional score is expected and meaningful. The legend and full
