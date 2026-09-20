@@ -25,3 +25,21 @@ only when multiple tactically admissible actions remain.
 
 Read the full source for the playable demo rather than copying its tactical helpers into
 an application without understanding their scope.
+
+## Plain-English semantic linter
+
+`semantic_linter.py` demonstrates a named bundle plus native async fan-out. Standard-library Python AST parsing owns exact file discovery, syntax errors, function boundaries, qualified names, decorators, and source locations. The `semantic-lint` bundle contains 14 independent plain-English Noul rules, and all 14 rules are evaluated in one request for each function.
+
+Independent functions are scheduled concurrently with bounded `AsyncJev` concurrency. The human summary calculates actual function, rule, judgment, and request counts, token usage, and observed elapsed time. JSON output preserves every rule probability and request metadata.
+
+```bash
+pyjev decision show semantic-lint --config examples/.pyjev.toml --json
+pyjev decision validate --config examples/.pyjev.toml
+python examples/semantic_linter.py pyjev/client.py
+python examples/semantic_linter.py pyjev/client.py --show-all
+python examples/semantic_linter.py pyjev/client.py --json
+```
+
+> Batch independent semantic questions about one state into one Jev request; use ordinary async concurrency across independent states.
+
+The default threshold is a demo application policy, not a Jev correctness guarantee. Calibrate it against labeled examples before using this linter as a CI gate. The selected function source is sent to the configured Jev API; do not run it on code you are not permitted to send to that service.

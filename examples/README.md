@@ -9,6 +9,10 @@ Set `TYPESAFE_API_KEY` or run `pyjev auth set`, then run from the repository roo
 python examples/emergency_snack.py
 python examples/haunted_ci.py
 python examples/connect_four.py
+python examples/semantic_linter.py pyjev/client.py
+python examples/semantic_linter.py pyjev --threshold 0.80
+python examples/semantic_linter.py pyjev/client.py --show-all
+python examples/semantic_linter.py pyjev/client.py --json
 ```
 
 Jev evaluates **state + a typed question** and returns structured data rather than
@@ -29,6 +33,13 @@ free-form text.
   Forced moves do not call Jev because there is no decision to make. When Jev
   does choose, the example prints its selected column, confidence, and complete
   probability distribution over the candidate moves.
+
+- `semantic_linter.py` is the bundle + async example. Python's standard-library AST finds exact function boundaries, including decorators, methods, async functions, and nested functions. The `semantic-lint` named bundle contains 14 plain-English Noul rules; all 14 are evaluated in one request per function, while `AsyncJev` evaluates independent functions concurrently.
+  The terminal summary reports actual requests, judgments, token usage, and elapsed time. The reporting threshold is application policy and should be calibrated against labeled examples before using the linter as a CI gate.
+
+  The JSON report preserves every rule probability and request metadata. Use `--fail-on-findings` only when you deliberately want findings at the selected threshold to fail the command.
+
+  The selected function source is sent to the configured Jev API. Do not run the example on code you are not permitted to send to that service.
 
 This split is intentional. Jev is used as a judgment/decision model, not as a
 Connect Four board parser or deterministic rules engine. Giving the model

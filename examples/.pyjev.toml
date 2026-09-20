@@ -34,3 +34,63 @@ question = "What is the safest way to handle this meeting?"
 attend = "Attend and bring a written decision to make"
 shorten = "Shorten the meeting and capture the decision asynchronously"
 escape = "Decline politely and send the decision template"
+
+
+[decision.semantic-lint]
+type = "bundle"
+
+[decision.semantic-lint.questions.swallows-errors]
+type = "noul"
+question = "This function swallows errors."
+
+[decision.semantic-lint.questions.hidden-side-effect]
+type = "noul"
+question = "This function has a hidden side effect."
+
+[decision.semantic-lint.questions.too-many-jobs]
+type = "noul"
+question = "This function does too many jobs."
+
+[decision.semantic-lint.questions.surprising-mutation]
+type = "noul"
+question = "This function mutates caller-owned data in a surprising way."
+
+[decision.semantic-lint.questions.implicit-global-state]
+type = "noul"
+question = "This function depends on implicit global or process state."
+
+[decision.semantic-lint.questions.hidden-io]
+type = "noul"
+question = "This function hides I/O behind an interface that looks like local computation."
+
+[decision.semantic-lint.questions.policy-mechanism-mix]
+type = "noul"
+question = "This function mixes business policy with low-level mechanism."
+
+[decision.semantic-lint.questions.hard-to-follow-control-flow]
+type = "noul"
+question = "This function has control flow that is unnecessarily hard to follow."
+
+[decision.semantic-lint.questions.ambiguous-error-contract]
+type = "noul"
+question = "This function makes its error behavior ambiguous to callers."
+
+[decision.semantic-lint.questions.misleading-name]
+type = "noul"
+question = "This function's name understates or misrepresents what it does."
+
+[decision.semantic-lint.questions.coupled-concerns]
+type = "noul"
+question = "This function couples concerns that should be changeable independently."
+
+[decision.semantic-lint.questions.implicit-ordering]
+type = "noul"
+question = "This function relies on ordering or timing that is not explicit in its interface."
+
+[decision.semantic-lint.questions.magic-decision]
+type = "noul"
+question = "This function makes a consequential decision using a magic value or unexplained threshold."
+
+[decision.semantic-lint.questions.unexplained-special-case]
+type = "noul"
+question = "This function contains a workaround or special case whose reason is not made clear."
