@@ -229,8 +229,24 @@ with Jev() as jev:
 
 For several heterogeneous questions, use `jev.run(...)` to send one mixed request through the SDK.
 
-## Versioning and development
+## Connect Four tactical-proof example
 
+`examples/connect_four.py` keeps exact Connect Four mechanics and short bounded tactical proofs in Python. In addition to immediate wins and blocks, it checks whether an opponent reply creates a fork with no legal tactical escape. Proven losing candidates are removed before Jev is called.
+
+This is deliberately **not** a general Connect Four search engine: Python does not assign positional scores or run minimax for strategic evaluation. When multiple tactically admissible moves remain, Jev still makes the strategic judgment. The observed bad move was an action-space problem, not merely low confidence: a model cannot avoid a proven loss if the application offers it as a choice.
+
+Run the playable demo with a configured API key:
+
+```bash
+python examples/connect_four.py
+python examples/connect_four.py --strategy aggressive
+python examples/connect_four.py --debug
+python examples/connect_four.py --debug --trace connect-four.jsonl
+```
+
+`--debug` prints deterministic board facts, candidate keep/reject explanations, forcing proof branches, and the exact structured request and Jev response metadata for real calls. `--trace PATH` appends one JSONL record per completed turn; records contain no API credentials. `--self-play` runs the same player-relative tactical filter for Jev-X versus Jev-O.
+
+## Versioning and development
 Versions are derived from Git tags with `setuptools-scm`; a tagged `v0.1.0` checkout builds as `0.1.0`.
 
 ```bash

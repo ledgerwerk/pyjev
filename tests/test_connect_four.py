@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 from pathlib import Path
 from types import ModuleType
 from unittest.mock import Mock
@@ -100,8 +101,8 @@ def test_avoid_immediate_loss_removes_giving_move(connect_four: ModuleType) -> N
 
     candidates, reason = connect_four.tactical_candidates(board, connect_four.JEV_PIECE, connect_four.HUMAN)
 
-    assert reason == "avoid-immediate-loss"
-    assert [column + 1 for column in candidates] == [2, 4, 5, 6, 7]
+    assert reason == "forced-win-next-turn"
+    assert [column + 1 for column in candidates] == [6]
     assert 2 not in candidates
 
 
@@ -160,6 +161,169 @@ def test_invalid_jev_label_is_an_explicit_error(connect_four: ModuleType) -> Non
 
     with pytest.raises(RuntimeError, match="non-candidate"):
         connect_four.choose_jev_column(jev, board, candidates=[0, 1], reason="strategic-choice")
+
+
+def v3_board() -> list[list[str]]:
+    return [
+        list("......."),
+        list("......."),
+        list("......."),
+        list("......."),
+        list("...o..."),
+        list("...xx.."),
+    ]
+
+
+def test_v3_candidate_four_has_both_forcing_replies(connect_four: ModuleType) -> None:
+    forcing = connect_four.opponent_forcing_replies(
+        v3_board(),
+        3,
+        piece=connect_four.JEV_PIECE,
+        opponent=connect_four.HUMAN,
+    )
+
+    assert [column + 1 for column in forcing] == [3, 6]
+    assert forcing[2]["opponent_winning_columns_next"] == [2, 6]
+    assert forcing[5]["opponent_winning_columns_next"] == [3, 7]
+
+
+def test_v3_scan_filters_observed_fork_before_jev(connect_four: ModuleType) -> None:
+    selection = connect_four.scan_tactics(v3_board(), connect_four.JEV_PIECE, connect_four.HUMAN)
+
+    assert selection.reason == "avoid-forced-loss-next-turn"
+    assert [column + 1 for column in selection.candidates] == [3, 6]
+    assert 3 in selection.rejected
+    assert selection.rejected[3] == ["opponent-forcing-reply"]
+    assert selection.forcing_reply_proofs[2] == {}
+    assert selection.forcing_reply_proofs[5] == {}
+
+
+def test_v3_immediate_win_is_an_escape(connect_four: ModuleType) -> None:
+    board_after_candidate = [
+        list("......."),
+        list("......."),
+        list("......."),
+        list("......."),
+        list("......."),
+        list("ooo...x"),
+    ]
+    proof = connect_four.analyze_opponent_reply(
+        board_after_candidate,
+        6,
+        piece=connect_four.JEV_PIECE,
+        opponent=connect_four.HUMAN,
+    )
+
+    assert proof["your_immediate_winning_responses"] == [4]
+    assert 4 in proof["escape_responses"]
+    assert proof["forces_loss_next_turn"] is False
+
+
+def test_v3_forced_win_next_turn_is_preferred(connect_four: ModuleType) -> None:
+    board = [
+        list("x......"),
+        list("o......"),
+        list("o......"),
+        list("x..o..."),
+        list("ox.xx.."),
+        list("xx.oo.."),
+    ]
+    selection = connect_four.scan_tactics(board, connect_four.JEV_PIECE, connect_four.HUMAN)
+
+    assert selection.reason == "forced-win-next-turn"
+    assert [column + 1 for column in selection.candidates] == [6]
+
+
+def test_v3_player_relative_filter_is_symmetric(connect_four: ModuleType) -> None:
+    board = v3_board()
+    swapped = [[{"x": "o", "o": "x"}.get(cell, cell) for cell in row] for row in board]
+    original = connect_four.scan_tactics(board, "o", "x")
+    mirrored = connect_four.scan_tactics(swapped, "x", "o")
+
+    assert original.candidates == mirrored.candidates == [2, 5]
+    assert original.reason == mirrored.reason == "avoid-forced-loss-next-turn"
+
+
+def test_v3_strategy_does_not_change_tactical_selection(connect_four: ModuleType) -> None:
+    board = v3_board()
+    selections = [connect_four.scan_tactics(board, "o", "x") for _ in connect_four.STRATEGIES]
+
+    assert [selection.as_dict() for selection in selections] == [selections[0].as_dict()] * 3
+    assert connect_four.question_for_strategy("aggressive") != connect_four.question_for_strategy("defensive")
+
+
+def test_v3_jev_choices_contain_only_final_candidates(connect_four: ModuleType) -> None:
+    board = v3_board()
+    selection = connect_four.scan_tactics(board, "o", "x")
+    jev = Mock()
+    jev.choice.return_value.value = "3"
+
+    column, result, reason = connect_four.choose_jev_column(
+        jev,
+        board,
+        selection=selection,
+        debug=False,
+    )
+
+    assert (column, reason) == (2, "avoid-forced-loss-next-turn")
+    assert result is jev.choice.return_value
+    choices = jev.choice.call_args.kwargs["choices"]
+    assert set(choices) == {"3", "6"}
+
+
+def test_v3_debug_includes_proof_and_final_candidates(
+    connect_four: ModuleType,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    selection = connect_four.scan_tactics(v3_board(), "o", "x")
+    connect_four.print_tactical_debug(v3_board(), selection, piece="o", opponent="x")
+    output = capsys.readouterr().out
+
+    assert "candidate 4" in output
+    assert "forcing opponent replies" in output
+    assert "2" in output and "6" in output
+    assert "rejected" in output
+    assert "final candidates:   3 6" in output
+
+
+def test_v3_trace_is_jsonl_and_has_no_credentials(connect_four: ModuleType, tmp_path: Path) -> None:
+    selection = connect_four.scan_tactics(v3_board(), "o", "x")
+    player = connect_four.Player("Jev", "o", "jev", "balanced")
+    path = tmp_path / "connect-four.jsonl"
+    record = connect_four.trace_record(
+        turn=4,
+        player=player,
+        board_before=v3_board(),
+        selection=selection,
+        result=None,
+        selected_column=2,
+        board_after=connect_four.board_after_move(v3_board(), 2, "o"),
+    )
+    connect_four.append_trace(path, record)
+
+    loaded = json.loads(path.read_text())
+    assert loaded["tactical"]["candidates"] == [3, 6]
+    assert loaded["model_call"]["performed"] is False
+    assert "api_key" not in json.dumps(loaded).lower()
+
+
+def test_v3_single_deep_candidate_skips_jev(connect_four: ModuleType) -> None:
+    board = [
+        list("x......"),
+        list("o......"),
+        list("o......"),
+        list("x..o..."),
+        list("ox.xx.."),
+        list("xx.oo.."),
+    ]
+    jev = Mock()
+    column, result, reason = connect_four.choose_jev_column(jev, board)
+
+    assert column == 5
+    assert result is None
+    assert reason == "forced-win-next-turn"
+    jev.choice.assert_not_called()
+
 
 
 def test_mechanics_cover_gravity_full_columns_and_win_directions(connect_four: ModuleType) -> None:
