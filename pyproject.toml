@@ -1,0 +1,71 @@
+[build-system]
+requires = ["setuptools>=80", "setuptools-scm>=8"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pyjev"
+dynamic = ["version"]
+description = "Reusable, confidence-aware Jev decisions for Python and the shell."
+readme = "README.md"
+requires-python = ">=3.10"
+license = "Apache-2.0"
+authors = [{ name = "holgern" }]
+keywords = ["jev", "typesafe", "ai", "decision", "cli"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Environment :: Console",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence",
+  "Topic :: Software Development :: Libraries :: Python Modules",
+]
+dependencies = [
+  "typesafe-sdk>=0.7.0,<1",
+  "typer>=0.16,<1",
+  "keyring>=25,<26",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=9,<10",
+  "ruff>=0.16,<1",
+]
+
+[project.scripts]
+pyjev = "pyjev.cli:app"
+
+[project.urls]
+Homepage = "https://github.com/ledgerwerk/pyjev"
+Repository = "https://github.com/ledgerwerk/pyjev"
+Issues = "https://github.com/ledgerwerk/pyjev/issues"
+Documentation = "https://docs.typesafe.ai/"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["pyjev*"]
+
+[tool.setuptools.package-data]
+pyjev = ["py.typed"]
+
+[tool.setuptools_scm]
+version_file = "pyjev/_version.py"
+fallback_version = "0.0.0"
+parentdir_prefix_version = "pyjev-"
+local_scheme = "no-local-version"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+pythonpath = ["."]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 120
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
