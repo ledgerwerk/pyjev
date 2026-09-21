@@ -71,6 +71,21 @@ from pyjev import Jev
 with Jev() as jev:
     result = jev.decide("ticket-route", state="Stripe checkout fails")
 
+
+For local result and policy composition, use the optional pipeline stages without hiding the network call:
+
+```python
+from pyjev.pipeline import require_confidence
+
+policy = require_confidence(0.70)
+outcome = result | policy
+if outcome.passed:
+    route_to(outcome.value)
+else:
+    human_review(outcome.result)
+```
+
+The pipe operates only on an already returned result. It does not execute handlers or turn model output into an action.
 print(result.value, result.confidence, result.probabilities)
 ```
 

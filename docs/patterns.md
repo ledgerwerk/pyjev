@@ -125,6 +125,23 @@ caller may use as part of an explicit policy. The CLI exposes
 decisions. Python policy is the right place for different thresholds per
 consequence.
 
+### Result-pipeline form
+
+The same child-specific gate can be expressed with the optional local pipeline API:
+
+```python
+from pyjev.pipeline import answer, require_confidence
+
+route_policy = answer("intent") | require_confidence(0.60)
+outcome = result | route_policy
+
+if outcome.passed:
+    handle_intent(outcome.value)
+else:
+    route_to_human(outcome.result)
+```
+
+This is an ergonomic alternative to the explicit `if` form above. It does not make a network request, dispatch a handler, or add aggregate confidence to a bundle. For a Noul child, use `require_probability(at_least=...)` or `require_probability(at_most=...)` instead of a confidence gate.
 Bundles deliberately have no aggregate confidence. A bundle may contain a
 high-confidence intent, a low-confidence severity, and another signal with a
 different consequence. Gate the child result that controls the action instead

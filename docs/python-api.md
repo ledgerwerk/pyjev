@@ -74,6 +74,37 @@ Use `.value`, `.confidence`, `.probabilities`, and `.legend` as applicable. Ever
 also preserves model, usage, raw answer data, and request ID. `NoulResult.value` remains
 the raw probability of true.
 
+## Result pipelines
+
+The optional `pyjev.pipeline` module composes already returned result objects with local policy stages. The pipe never creates a client or performs network I/O, so the Jev call remains visible:
+
+```python
+from pyjev import Jev
+from pyjev.pipeline import answer, require_confidence
+
+policy = answer("intent") | require_confidence(0.70)
+
+with Jev() as jev:
+    result = jev.decide("support-triage", state={"message": message})
+
+outcome = result | policy
+if outcome.passed:
+    route_to(outcome.value)
+else:
+    human_review(outcome.result)
+```
+
+`answer(name)` selects the exact typed child from a `BundleResult`. Confidence gates accept only `ChoiceResult` and `ScoreResult`, and preserve the complete result in either an `Accepted` or `Rejected` outcome. A rejected outcome has no `.value` attribute, so a below-threshold result cannot be mistaken for permission to act.
+
+For `NoulResult`, use the separate probability policy:
+
+```python
+from pyjev.pipeline import require_probability
+
+outcome = result | require_probability(at_least=0.80)
+```
+
+Thresholds are inclusive and must be finite values from 0 through 1. Choice and Score confidence is a Jev-supplied signal, not the probability that an answer is correct. The same local pipeline works after either synchronous or asynchronous evaluation.
 ## Async API
 
 When the installed official SDK supports native async transport, `AsyncJev` exposes the

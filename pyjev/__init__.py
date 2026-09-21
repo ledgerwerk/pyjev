@@ -9,6 +9,7 @@ from typing import Any
 
 from .client import AsyncJev, Jev
 from .compile import CompiledDecision, compile_decision
+from .pipeline import Accepted, GateEvidence, Rejected
 from .results import BundleResult, ChoiceResult, NoulResult, ScoreResult
 
 try:
@@ -34,6 +35,9 @@ def decide(
 
 
 __all__ = [
+    "Accepted",
+    "GateEvidence",
+    "Rejected",
     "BundleResult",
     "CompiledDecision",
     "AsyncJev",
