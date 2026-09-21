@@ -10,6 +10,7 @@ python examples/emergency_snack.py
 python examples/haunted_ci.py
 python examples/connect_four.py
 python examples/support_triage.py
+python examples/emoji_jev.py
 python examples/semantic_linter.py pyjev/client.py
 python examples/semantic_linter.py pyjev --threshold 0.80
 python examples/semantic_linter.py pyjev/client.py --show-all
@@ -45,11 +46,12 @@ free-form text.
 - `support_triage.py` combines intent routing, composite scoring, confidence-gated actions, and speculative fan-out. The `support-triage` bundle asks all six questions in one request, then ordinary Python chooses the handler. Child confidence remains visible, branch-irrelevant answers are ignored, and the printed attention score uses caller-owned normalization and weights.
   The example is intentionally explainable rather than prescriptive. Thresholds and weights are application policy, and confidence is not a correctness probability.
 
-This split is intentional. Jev is used as a judgment/decision model, not as a
-Connect Four board parser or deterministic rules engine. Giving the model
-precomputed facts makes the decision interface stronger and keeps exact logic in
-ordinary Python.
-The examples intentionally show the boundary between Jev/TypeSafe and pyjev:
+- `emoji_jev.py` is an interactive named-bundle example. Each non-empty message is one request containing a 64-way emoji Choice and side questions for emotion, mood, urgency, energy, reply intent, sarcasm, and jokes. The selected emoji comes from the Choice value, while the same preserved probability distribution supplies the top alternatives. Runtime output includes available token counts, model, request ID, and client-observed elapsed time. No free-form model prose is parsed: Jev supplies typed results, and ordinary Python ranks and formats them.
+  This split is intentional. Jev is used as a judgment/decision model, not as a
+  Connect Four board parser or deterministic rules engine. Giving the model
+  precomputed facts makes the decision interface stronger and keeps exact logic in
+  ordinary Python.
+  The examples intentionally show the boundary between Jev/TypeSafe and pyjev:
 
 - TypeSafe supplies state evaluation, Choice and Score semantics, the selected answer
   or score, probabilities, confidence, and model response metadata.

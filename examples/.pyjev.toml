@@ -144,3 +144,132 @@ levels = [
   "Frustrated but civil",
   "Very angry",
 ]
+
+[decision.emoji-jev]
+type = "bundle"
+model = "jev-latest"
+
+[decision.emoji-jev.questions.emoji]
+type = "choice"
+question = "Which emoji best matches the meaning, tone, and likely conversational use of this message?"
+
+[decision.emoji-jev.questions.emoji.options]
+grinning = "happy, cheerful, good news"
+joy_tears = "laughing hard, hilarious, can't stop laughing"
+rofl = "rolling on the floor laughing, absurdly funny"
+smiling_eyes = "warm, content, pleased"
+heart_eyes = "adoration, love at first sight, gorgeous"
+star_struck = "amazed, starstruck, wow"
+kiss = "affection, blowing a kiss, love you"
+yum = "delicious food, tasty, savouring"
+tongue_wink = "playful, silly, teasing"
+hugging = "hug, comfort, welcome, support"
+thinking = "pondering, unsure, considering"
+raised_eyebrow = "suspicious, skeptical, doubtful"
+neutral = "indifferent, meh, blank"
+smirk = "smug, flirty, knowing"
+unamused = "annoyed, unimpressed, bored"
+eye_roll = "exasperated, ugh, eye roll"
+grimace = "awkward, cringe, yikes"
+relieved = "relieved, calm, peaceful"
+pensive = "sad, wistful, disappointed"
+sleeping = "asleep, bedtime, snoring"
+mask = "sick, ill, flu, contagious"
+exploding_head = "mind blown, shocking revelation"
+partying = "party, birthday, celebration"
+sunglasses = "cool, confident, effortless"
+nerd = "nerdy, studying, technical detail"
+confused = "confused, unsure what happened"
+worried = "worried, concerned, anxious"
+flushed = "embarrassed, blushing, caught out"
+pleading = "please, begging, puppy eyes, touching"
+fearful = "scared, frightened, fear"
+anxious_sweat = "nervous, stressed, cold sweat"
+crying = "crying, sad, tearful"
+loudly_crying = "sobbing, devastated, ugly crying"
+screaming = "screaming in fear or shock, horror"
+disappointed = "disappointed, let down, dejected"
+weary = "weary, fed up, exhausted, ugh"
+tired_face = "tired, over it, can't anymore"
+yawning = "bored, yawning, dull"
+angry = "angry, mad, irritated"
+rage = "furious, enraged, livid"
+cursing = "swearing, extremely angry"
+smiling_imp = "mischievous, devilish, up to no good"
+skull = "dead, dying of laughter, or literally dead"
+clown = "clown, foolish, embarrassing behaviour"
+sweat_smile = "nervous laugh, phew, awkward relief"
+upside_down = "wry, ironic, this is fine, quietly losing it"
+smiling_tear = "bittersweet, happy but sad, touched"
+melting = "melting, overwhelmed, embarrassed, dying inside"
+holding_back_tears = "moved, grateful, about to cry from emotion"
+heart = "love, deep affection"
+broken_heart = "heartbreak, breakup, grief"
+fire = "fire, amazing, lit, hot take, literal fire"
+sparkles = "magic, sparkle, special, new and shiny"
+hundred = "100 percent, agree completely, perfect score"
+eyes = "watching, looking, suspicious interest, gossip"
+thumbs_up = "approval, ok, good job"
+clap = "applause, congratulations, well done"
+raised_hands = "hooray, praise, celebration"
+pray = "please, thank you, hoping, grateful"
+facepalm = "facepalm, disbelief at stupidity"
+shrug = "don't know, whatever, shrug"
+muscle = "strength, effort, gym, you can do it"
+party_popper = "celebration, congratulations, success"
+rocket = "launch, growth, to the moon, shipping"
+
+[decision.emoji-jev.questions.emotion]
+type = "choice"
+question = "What is the primary emotion expressed by this message?"
+
+[decision.emoji-jev.questions.emotion.options]
+joy = "happiness, delight, celebration"
+love = "affection, warmth, gratitude"
+surprise = "shock, amazement, did not expect that"
+sadness = "grief, disappointment, loss"
+anger = "frustration, irritation, outrage"
+fear = "worry, anxiety, dread"
+disgust = "revulsion, contempt, gross"
+neutral = "no strong emotion, matter of fact"
+
+[decision.emoji-jev.questions.mood]
+type = "score"
+question = "How positive or negative is the overall mood of this message?"
+levels = [
+  "devastated",
+  "down",
+  "neutral",
+  "upbeat",
+  "ecstatic",
+]
+
+[decision.emoji-jev.questions.urgency]
+type = "score"
+question = "How urgently does this message appear to need attention or action?"
+levels = [
+  "no rush",
+  "soon",
+  "right now",
+]
+
+[decision.emoji-jev.questions.energy]
+type = "score"
+question = "How much expressive energy does this message carry?"
+levels = [
+  "flat",
+  "steady",
+  "buzzing",
+]
+
+[decision.emoji-jev.questions.wants-reply]
+type = "noul"
+question = "This message appears to want or invite a reply."
+
+[decision.emoji-jev.questions.sarcasm]
+type = "noul"
+question = "This message is sarcastic or intentionally ironic."
+
+[decision.emoji-jev.questions.joke]
+type = "noul"
+question = "This message is intended as a joke or humorous remark."

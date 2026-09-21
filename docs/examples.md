@@ -43,3 +43,9 @@ python examples/semantic_linter.py pyjev/client.py --json
 > Batch independent semantic questions about one state into one Jev request; use ordinary async concurrency across independent states.
 
 The default threshold is a demo application policy, not a Jev correctness guarantee. Calibrate it against labeled examples before using this linter as a CI gate. The selected function source is sent to the configured Jev API; do not run it on code you are not permitted to send to that service.
+
+## Emoji Jev
+
+`emoji_jev.py` is an interactive named-bundle example. A single request evaluates a 64-way emoji Choice plus tone questions. The terminal displays the selected emoji, top alternatives from the Choice probability distribution, typed side signals, request metadata, token usage, and client-observed round-trip time.
+
+The top-N display is deterministic Python over Jev's preserved probability distribution; it is not a second model call.
