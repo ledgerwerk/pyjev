@@ -1,0 +1,588 @@
+ README.md              |  15 ++++
+ docs/confidence.md     |  15 ++++
+ docs/patterns.md       |  17 ++++
+ docs/python-api.md     |  31 +++++++
+ pyjev/__init__.py      |   4 +
+ pyjev/pipeline.py      | 202 ++++++++++++++++++++++++++++++++++++++++++++
+ tests/test_pipeline.py | 221 +++++++++++++++++++++++++++++++++++++++++++++++++
+ 7 files changed, 505 insertions(+)
+
+diff --git a/README.md b/README.md
+index c8f39a7..e1ff33c 100644
+--- a/README.md
++++ b/README.md
+@@ -71,6 +71,21 @@ from pyjev import Jev
+ with Jev() as jev:
+     result = jev.decide("ticket-route", state="Stripe checkout fails")
+
++
++For local result and policy composition, use the optional pipeline stages without hiding the network call:
++
++```python
++from pyjev.pipeline import require_confidence
++
++policy = require_confidence(0.70)
++outcome = result | policy
++if outcome.passed:
++    route_to(outcome.value)
++else:
++    human_review(outcome.result)
++```
++
++The pipe operates only on an already returned result. It does not execute handlers or turn model output into an action.
+ print(result.value, result.confidence, result.probabilities)
+ ```
+
+diff --git a/docs/confidence.md b/docs/confidence.md
+index a8e11c2..b26b1f9 100644
+--- a/docs/confidence.md
++++ b/docs/confidence.md
+@@ -26,6 +26,21 @@ accidentally consumed by a pipeline. Use the exit code to route to human review.
+
+ ## Thresholds belong to the application
+
++
++The Python equivalent is a value-level policy outcome rather than a process exit:
++
++```python
++from pyjev.pipeline import require_confidence
++
++outcome = result | require_confidence(0.85)
++if outcome.passed:
++    use_value(outcome.value)
++else:
++    human_review(outcome.result)
++```
++
++Both gates consume the same Choice/Score `confidence` signal. Neither treats that signal as a correctness probability, and a rejected Python outcome still preserves the complete result for review. `require_probability()` is a separate policy for a Noul probability of true.
++
+ A threshold is invocation policy, not a universal Jev recommendation. Different actions
+ have different consequences. Keep thresholds at the call site until a deliberate policy
+ and outcome abstraction exists. pyjev does not add `min_confidence` to `.pyjev.toml` in
+diff --git a/docs/patterns.md b/docs/patterns.md
+index ee0526d..690fecc 100644
+--- a/docs/patterns.md
++++ b/docs/patterns.md
+@@ -125,6 +125,23 @@ caller may use as part of an explicit policy. The CLI exposes
+ decisions. Python policy is the right place for different thresholds per
+ consequence.
+
++### Result-pipeline form
++
++The same child-specific gate can be expressed with the optional local pipeline API:
++
++```python
++from pyjev.pipeline import answer, require_confidence
++
++route_policy = answer("intent") | require_confidence(0.60)
++outcome = result | route_policy
++
++if outcome.passed:
++    handle_intent(outcome.value)
++else:
++    route_to_human(outcome.result)
++```
++
++This is an ergonomic alternative to the explicit `if` form above. It does not make a network request, dispatch a handler, or add aggregate confidence to a bundle. For a Noul child, use `require_probability(at_least=...)` or `require_probability(at_most=...)` instead of a confidence gate.
+ Bundles deliberately have no aggregate confidence. A bundle may contain a
+ high-confidence intent, a low-confidence severity, and another signal with a
+ different consequence. Gate the child result that controls the action instead
+diff --git a/docs/python-api.md b/docs/python-api.md
+index 419d950..c804e4a 100644
+--- a/docs/python-api.md
++++ b/docs/python-api.md
+@@ -74,6 +74,37 @@ Use `.value`, `.confidence`, `.probabilities`, and `.legend` as applicable. Ever
+ also preserves model, usage, raw answer data, and request ID. `NoulResult.value` remains
+ the raw probability of true.
+
++## Result pipelines
++
++The optional `pyjev.pipeline` module composes already returned result objects with local policy stages. The pipe never creates a client or performs network I/O, so the Jev call remains visible:
++
++```python
++from pyjev import Jev
++from pyjev.pipeline import answer, require_confidence
++
++policy = answer("intent") | require_confidence(0.70)
++
++with Jev() as jev:
++    result = jev.decide("support-triage", state={"message": message})
++
++outcome = result | policy
++if outcome.passed:
++    route_to(outcome.value)
++else:
++    human_review(outcome.result)
++```
++
++`answer(name)` selects the exact typed child from a `BundleResult`. Confidence gates accept only `ChoiceResult` and `ScoreResult`, and preserve the complete result in either an `Accepted` or `Rejected` outcome. A rejected outcome has no `.value` attribute, so a below-threshold result cannot be mistaken for permission to act.
++
++For `NoulResult`, use the separate probability policy:
++
++```python
++from pyjev.pipeline import require_probability
++
++outcome = result | require_probability(at_least=0.80)
++```
++
++Thresholds are inclusive and must be finite values from 0 through 1. Choice and Score confidence is a Jev-supplied signal, not the probability that an answer is correct. The same local pipeline works after either synchronous or asynchronous evaluation.
+ ## Async API
+
+ When the installed official SDK supports native async transport, `AsyncJev` exposes the
+diff --git a/pyjev/__init__.py b/pyjev/__init__.py
+index 242bd28..8f63386 100644
+--- a/pyjev/__init__.py
++++ b/pyjev/__init__.py
+@@ -9,6 +9,7 @@ from typing import Any
+
+ from .client import AsyncJev, Jev
+ from .compile import CompiledDecision, compile_decision
++from .pipeline import Accepted, GateEvidence, Rejected
+ from .results import BundleResult, ChoiceResult, NoulResult, ScoreResult
+
+ try:
+@@ -34,6 +35,9 @@ def decide(
+
+
+ __all__ = [
++    "Accepted",
++    "GateEvidence",
++    "Rejected",
+     "BundleResult",
+     "CompiledDecision",
+     "AsyncJev",
+diff --git a/pyjev/pipeline.py b/pyjev/pipeline.py
+new file mode 100644
+index 0000000..f154a2b
+--- /dev/null
++++ b/pyjev/pipeline.py
+@@ -0,0 +1,202 @@
++"""Local composition stages for already-evaluated pyjev results."""
++
++from __future__ import annotations
++
++import math
++from dataclasses import dataclass
++from typing import Any, Generic, Literal, TypeAlias, TypeVar
++
++from .results import BundleResult, ChoiceResult, NoulResult, PrimitiveResult, ScoreResult
++
++InputT = TypeVar("InputT")
++OutputT = TypeVar("OutputT")
++ValueT = TypeVar("ValueT")
++
++
++class PipelineError(ValueError):
++    """Base class for invalid local result-pipeline operations."""
++
++
++class PipelineTypeError(PipelineError, TypeError):
++    """A stage received an incompatible pyjev result type."""
++
++
++class PipelineLookupError(PipelineError, KeyError):
++    """A requested bundle answer does not exist."""
++
++
++@dataclass(frozen=True, slots=True)
++class GateEvidence:
++    """The signal and threshold used by a local gate."""
++
++    signal: Literal["confidence", "probability"]
++    observed: float
++    comparator: Literal["at_least", "at_most"]
++    threshold: float
++
++
++@dataclass(frozen=True, slots=True)
++class Accepted(Generic[ValueT]):
++    """A result value that satisfied an application policy gate."""
++
++    value: ValueT
++    result: PrimitiveResult
++    gate: GateEvidence
++    passed: Literal[True] = True
++
++
++@dataclass(frozen=True, slots=True)
++class Rejected:
++    """A valid result that did not satisfy an application policy gate."""
++
++    result: PrimitiveResult
++    gate: GateEvidence
++    passed: Literal[False] = False
++
++
++GateOutcome: TypeAlias = Accepted[Any] | Rejected
++
++
++class PipeStage(Generic[InputT, OutputT]):
++    """A local stage that can consume one pipeline value."""
++
++    def apply(self, value: InputT) -> OutputT:
++        raise NotImplementedError
++
++    def __ror__(self, value: InputT) -> OutputT:
++        return self.apply(value)
++
++    def __or__(self, other: PipeStage[Any, Any]) -> Pipe:
++        if not isinstance(other, PipeStage):
++            raise TypeError("pipeline stages can only be composed with another PipeStage")
++        if isinstance(other, Pipe):
++            return Pipe((self, *other.stages))
++        return Pipe((self, other))
++
++
++@dataclass(frozen=True, slots=True)
++class Pipe(PipeStage[Any, Any]):
++    """An immutable left-to-right composition of local pipeline stages."""
++
++    stages: tuple[PipeStage[Any, Any], ...]
++
++    def apply(self, value: Any) -> Any:
++        for stage in self.stages:
++            value = stage.apply(value)
++        return value
++
++    def __or__(self, other: PipeStage[Any, Any]) -> Pipe:
++        if not isinstance(other, PipeStage):
++            raise TypeError("pipeline stages can only be composed with another PipeStage")
++        if isinstance(other, Pipe):
++            return Pipe((*self.stages, *other.stages))
++        return Pipe((*self.stages, other))
++
++
++@dataclass(frozen=True, slots=True)
++class AnswerStage(PipeStage[BundleResult, PrimitiveResult]):
++    """Select one existing primitive result from a bundle."""
++
++    name: str
++
++    def apply(self, value: BundleResult) -> PrimitiveResult:
++        if not isinstance(value, BundleResult):
++            raise PipelineTypeError(
++                f"answer({self.name!r}) expected BundleResult, got {type(value).__name__}"
++            )
++        try:
++            return value.answers[self.name]
++        except KeyError as error:
++            available = ", ".join(sorted(value.answers)) or "<none>"
++            raise PipelineLookupError(
++                f"unknown bundle answer {self.name!r}; available answers: {available}"
++            ) from error
++
++
++@dataclass(frozen=True, slots=True)
++class ConfidenceGateStage(PipeStage[ChoiceResult | ScoreResult, GateOutcome]):
++    """Gate a Choice or Score result using its Jev confidence signal."""
++
++    minimum: float
++
++    def apply(self, value: ChoiceResult | ScoreResult) -> GateOutcome:
++        if not isinstance(value, (ChoiceResult, ScoreResult)):
++            raise PipelineTypeError(
++                "require_confidence expected ChoiceResult or ScoreResult, "
++                f"got {type(value).__name__}"
++            )
++        gate = GateEvidence(
++            signal="confidence",
++            observed=value.confidence,
++            comparator="at_least",
++            threshold=self.minimum,
++        )
++        if value.confidence >= self.minimum:
++            return Accepted(value=value.value, result=value, gate=gate)
++        return Rejected(result=value, gate=gate)
++
++
++@dataclass(frozen=True, slots=True)
++class ProbabilityGateStage(PipeStage[NoulResult, GateOutcome]):
++    """Gate a Noul result using its probability-of-true value."""
++
++    comparator: Literal["at_least", "at_most"]
++    threshold: float
++
++    def apply(self, value: NoulResult) -> GateOutcome:
++        if not isinstance(value, NoulResult):
++            raise PipelineTypeError(
++                "require_probability expected NoulResult, "
++                f"got {type(value).__name__}"
++            )
++        gate = GateEvidence(
++            signal="probability",
++            observed=value.value,
++            comparator=self.comparator,
++            threshold=self.threshold,
++        )
++        passed = (
++            value.value >= self.threshold
++            if self.comparator == "at_least"
++            else value.value <= self.threshold
++        )
++        if passed:
++            return Accepted(value=value.value, result=value, gate=gate)
++        return Rejected(result=value, gate=gate)
++
++
++def _validate_threshold(value: float, name: str) -> float:
++    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
++        raise ValueError(f"{name} must be a finite value between 0 and 1")
++    if not 0 <= value <= 1:
++        raise ValueError(f"{name} must be between 0 and 1")
++    return float(value)
++
++
++def answer(name: str) -> AnswerStage:
++    """Create a stage selecting a named child from a BundleResult."""
++    if not isinstance(name, str) or not name:
++        raise ValueError("answer name must be a non-empty string")
++    return AnswerStage(name=name)
++
++
++def require_confidence(minimum: float) -> ConfidenceGateStage:
++    """Create an inclusive confidence gate for Choice or Score results."""
++    return ConfidenceGateStage(minimum=_validate_threshold(minimum, "confidence threshold"))
++
++
++def require_probability(
++    *, at_least: float | None = None, at_most: float | None = None
++) -> ProbabilityGateStage:
++    """Create an inclusive lower or upper probability gate for Noul results."""
++    if (at_least is None) == (at_most is None):
++        raise ValueError("require_probability requires exactly one of at_least or at_most")
++    if at_least is not None:
++        return ProbabilityGateStage(
++            comparator="at_least",
++            threshold=_validate_threshold(at_least, "probability threshold"),
++        )
++    return ProbabilityGateStage(
++        comparator="at_most",
++        threshold=_validate_threshold(at_most, "probability threshold"),
++    )
+diff --git a/tests/test_pipeline.py b/tests/test_pipeline.py
+new file mode 100644
+index 0000000..8f163b8
+--- /dev/null
++++ b/tests/test_pipeline.py
+@@ -0,0 +1,221 @@
++from __future__ import annotations
++
++import inspect
++import math
++
++import pytest
++
++import pyjev.pipeline as pipeline
++from pyjev import BundleResult, ChoiceResult, NoulResult, ScoreResult
++from pyjev.pipeline import (
++    Accepted,
++    PipelineLookupError,
++    PipelineTypeError,
++    Rejected,
++    answer,
++    require_confidence,
++    require_probability,
++)
++
++
++def choice(value: str = "billing", confidence: float = 0.85) -> ChoiceResult:
++    return ChoiceResult(
++        value=value,
++        confidence=confidence,
++        probabilities={value: confidence, "other": 1 - confidence},
++        model="test-model",
++        usage={},
++        raw={"choice": value, "confidence": confidence},
++    )
++
++
++def score(value: float = 2.5, confidence: float = 0.85) -> ScoreResult:
++    return ScoreResult(
++        value=value,
++        confidence=confidence,
++        probabilities={2: 0.2, 3: 0.8},
++        legend={2: "normal", 3: "urgent"},
++        model="test-model",
++        usage={},
++        raw={"score": value, "confidence": confidence},
++    )
++
++
++def noul(value: float = 0.85) -> NoulResult:
++    return NoulResult(value=value, model="test-model", usage={}, raw={"noul": value})
++
++
++def bundle(**answers: object) -> BundleResult:
++    return BundleResult(answers=answers, model="test-model", usage={}, raw={})
++
++
++@pytest.mark.parametrize("threshold", [-0.01, 1.01, math.nan, math.inf, -math.inf])
++def test_require_confidence_rejects_invalid_threshold(threshold: float) -> None:
++    with pytest.raises(ValueError, match="between 0 and 1"):
++        require_confidence(threshold)
++
++
++def test_require_probability_requires_exactly_one_bound() -> None:
++    with pytest.raises(ValueError, match="exactly one"):
++        require_probability()
++    with pytest.raises(ValueError, match="exactly one"):
++        require_probability(at_least=0.5, at_most=0.5)
++
++
++def test_require_probability_rejects_invalid_thresholds() -> None:
++    for kwargs in ({"at_least": -0.1}, {"at_most": 1.1}, {"at_least": math.nan}):
++        with pytest.raises(ValueError, match="between 0 and 1"):
++            require_probability(**kwargs)
++
++
++def test_answer_requires_nonempty_name() -> None:
++    with pytest.raises(ValueError, match="non-empty"):
++        answer("")
++
++
++def test_answer_selects_existing_bundle_child_by_identity() -> None:
++    child = choice()
++    result = bundle(intent=child)
++
++    assert result | answer("intent") is child
++
++
++def test_answer_rejects_primitive_result() -> None:
++    with pytest.raises(PipelineTypeError, match="BundleResult"):
++        choice() | answer("intent")
++
++
++def test_answer_unknown_key_mentions_available_answers() -> None:
++    with pytest.raises(PipelineLookupError, match="missing.*intent.*urgency"):
++        bundle(intent=choice(), urgency=score()) | answer("missing")
++
++
++def test_confidence_gate_accepts_choice_above_threshold() -> None:
++    result = choice(confidence=0.85)
++
++    outcome = result | require_confidence(0.80)
++
++    assert isinstance(outcome, Accepted)
++    assert outcome.value == "billing"
++    assert outcome.result is result
++    assert outcome.gate.observed == 0.85
++    assert outcome.gate.comparator == "at_least"
++
++
++def test_confidence_gate_accepts_choice_exactly_at_threshold() -> None:
++    result = choice(confidence=0.70)
++
++    assert (result | require_confidence(0.70)).passed is True
++
++
++def test_confidence_gate_rejects_choice_below_threshold() -> None:
++    result = choice(confidence=0.69)
++
++    outcome = result | require_confidence(0.70)
++
++    assert isinstance(outcome, Rejected)
++    assert outcome.passed is False
++    assert outcome.result is result
++    assert not hasattr(outcome, "value")
++
++
++def test_confidence_gate_accepts_score() -> None:
++    result = score(confidence=0.90)
++
++    outcome = result | require_confidence(0.90)
++
++    assert isinstance(outcome, Accepted)
++    assert outcome.value == 2.5
++    assert outcome.result is result
++
++
++@pytest.mark.parametrize("result", [noul(), bundle(intent=choice())])
++def test_confidence_gate_rejects_incompatible_result_types(result: object) -> None:
++    with pytest.raises(PipelineTypeError, match="ChoiceResult or ScoreResult"):
++        result | require_confidence(0.70)
++
++
++def test_rejected_confidence_preserves_complete_result() -> None:
++    result = choice(confidence=0.20)
++
++    outcome = result | require_confidence(0.80)
++
++    assert isinstance(outcome, Rejected)
++    assert outcome.result.to_dict() == result.to_dict()
++    assert outcome.gate.observed == 0.20
++
++
++def test_probability_at_least_accepts_noul() -> None:
++    result = noul(0.80)
++
++    outcome = result | require_probability(at_least=0.80)
++
++    assert isinstance(outcome, Accepted)
++    assert outcome.value == 0.80
++    assert outcome.result is result
++
++
++def test_probability_at_least_rejects_noul() -> None:
++    result = noul(0.79)
++
++    outcome = result | require_probability(at_least=0.80)
++
++    assert isinstance(outcome, Rejected)
++    assert outcome.result is result
++    assert not hasattr(outcome, "value")
++
++
++def test_probability_at_most_accepts_noul() -> None:
++    result = noul(0.20)
++
++    outcome = result | require_probability(at_most=0.20)
++
++    assert isinstance(outcome, Accepted)
++    assert outcome.value == 0.20
++    assert outcome.gate.comparator == "at_most"
++
++
++def test_probability_at_most_rejects_noul() -> None:
++    result = noul(0.21)
++
++    assert isinstance(result | require_probability(at_most=0.20), Rejected)
++
++
++def test_probability_gate_rejects_choice_type() -> None:
++    with pytest.raises(PipelineTypeError, match="NoulResult"):
++        choice() | require_probability(at_least=0.70)
++
++
++def test_stage_chain_runs_left_to_right() -> None:
++    result = bundle(intent=choice(confidence=0.70))
++
++    outcome = result | answer("intent") | require_confidence(0.70)
++
++    assert isinstance(outcome, Accepted)
++    assert outcome.value == "billing"
++
++
++def test_reusable_bundle_policy() -> None:
++    policy = answer("intent") | require_confidence(0.70)
++
++    accepted = bundle(intent=choice(confidence=0.70)) | policy
++    rejected = bundle(intent=choice(confidence=0.69)) | policy
++
++    assert isinstance(accepted, Accepted)
++    assert isinstance(rejected, Rejected)
++
++
++def test_result_pipe_does_not_modify_original_result() -> None:
++    result = bundle(intent=choice(confidence=0.70))
++    original_answers = result.answers.copy()
++
++    result | answer("intent") | require_confidence(0.80)
++
++    assert result.answers == original_answers
++
++
++def test_pipeline_module_never_constructs_client() -> None:
++    source = inspect.getsource(pipeline)
++
++    assert "TypeSafeClient" not in source
++    assert "Jev(" not in source

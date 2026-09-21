@@ -1,0 +1,113 @@
+{
+  "candidate_count": 5,
+  "candidates": [
+    {
+      "additions": 832,
+      "deletions": 124,
+      "patch_file": "91a3375.patch",
+      "patch_sha256": "3f7444761fcffaaf104eaf27c3c38665b13c7e4785212bca6624ee8836aec510",
+      "paths": [
+        "README.md",
+        "docs/agent-skill.md",
+        "docs/authentication.md",
+        "docs/cli.md",
+        "docs/comparisons.md",
+        "docs/confidence.md",
+        "docs/getting-started.md",
+        "docs/index.md",
+        "docs/named-decisions.md",
+        "docs/python-api.md",
+        "pyjev/cli.py",
+        "pyjev/client.py",
+        "pyjev/compile.py",
+        "pyjev/decisions.py",
+        "pyproject.toml",
+        "skills/pyjev/SKILL.md",
+        "tests/test_cli.py",
+        "tests/test_client.py",
+        "tests/test_compile.py",
+        "tests/test_docs.py"
+      ],
+      "sha": "91a3375e129229ba6163ed7ccc72179cddee0039",
+      "short_sha": "91a3375",
+      "source_ref": "git:91a3375e129229ba6163ed7ccc72179cddee0039"
+    },
+    {
+      "additions": 745,
+      "deletions": 0,
+      "patch_file": "7ec851f.patch",
+      "patch_sha256": "3a018622517d74295045ac426d14b88e6a4e7d31f4ae96624548670c8d2ac379",
+      "paths": [
+        "docs/examples.md",
+        "examples/.pyjev.toml",
+        "examples/README.md",
+        "examples/semantic_linter.py",
+        "tests/test_semantic_linter.py"
+      ],
+      "sha": "7ec851f65b0ed224ebda1d9dee8d2e0135ba84bd",
+      "short_sha": "7ec851f",
+      "source_ref": "git:7ec851f65b0ed224ebda1d9dee8d2e0135ba84bd"
+    },
+    {
+      "additions": 598,
+      "deletions": 0,
+      "patch_file": "4735da1.patch",
+      "patch_sha256": "9e372acb2cfbb9653b4b3f2ac605fb404e7e350ba6e1537eea215c512a54b2a3",
+      "paths": [
+        "README.md",
+        "docs/index.md",
+        "docs/patterns.md",
+        "examples/.pyjev.toml",
+        "examples/README.md",
+        "examples/support_triage.py",
+        "tests/test_docs.py",
+        "tests/test_support_triage.py"
+      ],
+      "sha": "4735da1e1114f81386ce1cc4c992a0c27009eb2c",
+      "short_sha": "4735da1",
+      "source_ref": "git:4735da1e1114f81386ce1cc4c992a0c27009eb2c"
+    },
+    {
+      "additions": 520,
+      "deletions": 5,
+      "patch_file": "f33582f.patch",
+      "patch_sha256": "f460dc7392efcc41b263ec576277ca70417e5b25b2acd3bd03ab3c3d341f84d3",
+      "paths": [
+        "docs/examples.md",
+        "examples/.pyjev.toml",
+        "examples/README.md",
+        "examples/emoji_jev.py",
+        "tests/test_emoji_jev.py"
+      ],
+      "sha": "f33582fabbcbbf501785e78d147040b3b0a116d3",
+      "short_sha": "f33582f",
+      "source_ref": "git:f33582fabbcbbf501785e78d147040b3b0a116d3"
+    },
+    {
+      "additions": 505,
+      "deletions": 0,
+      "patch_file": "a4e4f2b.patch",
+      "patch_sha256": "3a5819559fa1a7a1e871854a4ce4d519a331aba222745cc8517785b66377dee7",
+      "paths": [
+        "README.md",
+        "docs/confidence.md",
+        "docs/patterns.md",
+        "docs/python-api.md",
+        "pyjev/__init__.py",
+        "pyjev/pipeline.py",
+        "tests/test_pipeline.py"
+      ],
+      "sha": "a4e4f2b8e9f2dfd5023a08d2a1d42896e023955b",
+      "short_sha": "a4e4f2b",
+      "source_ref": "git:a4e4f2b8e9f2dfd5023a08d2a1d42896e023955b"
+    }
+  ],
+  "git_base_ref": "f0a03f3a5b71ae32166ca602bfe97596b1feb498",
+  "git_base_sha": "f0a03f3a5b71ae32166ca602bfe97596b1feb498",
+  "git_head_ref": "a4e4f2b8e9f2dfd5023a08d2a1d42896e023955b",
+  "git_head_sha": "a4e4f2b8e9f2dfd5023a08d2a1d42896e023955b",
+  "include_merges": "nontrivial",
+  "object_type": "git_evidence_manifest",
+  "release_version": "v0.1.1",
+  "schema_version": 1
+}

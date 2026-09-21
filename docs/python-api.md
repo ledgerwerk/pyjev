@@ -105,6 +105,7 @@ outcome = result | require_probability(at_least=0.80)
 ```
 
 Thresholds are inclusive and must be finite values from 0 through 1. Choice and Score confidence is a Jev-supplied signal, not the probability that an answer is correct. The same local pipeline works after either synchronous or asynchronous evaluation.
+
 ## Async API
 
 When the installed official SDK supports native async transport, `AsyncJev` exposes the

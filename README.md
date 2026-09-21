@@ -65,7 +65,7 @@ echo 'Stripe checkout fails' | pyjev decide ticket-route --json
 
 Or from Python:
 
-```python
+````python
 from pyjev import Jev
 
 with Jev() as jev:
@@ -83,11 +83,12 @@ if outcome.passed:
     route_to(outcome.value)
 else:
     human_review(outcome.result)
-```
+````
 
 The pipe operates only on an already returned result. It does not execute handlers or turn model output into an action.
 print(result.value, result.confidence, result.probabilities)
-```
+
+````
 
 For async applications, use the native SDK-backed API:
 
@@ -96,7 +97,7 @@ from pyjev import AsyncJev
 
 async with AsyncJev() as jev:
     result = await jev.decide("ticket-route", state="Stripe checkout fails")
-```
+````
 
 ## Direct dynamic decisions
 

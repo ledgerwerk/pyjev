@@ -1,0 +1,578 @@
+ docs/examples.md        |   6 ++
+ examples/.pyjev.toml    | 129 +++++++++++++++++++++++++++
+ examples/README.md      |  12 +--
+ examples/emoji_jev.py   | 231 ++++++++++++++++++++++++++++++++++++++++++++++++
+ tests/test_emoji_jev.py | 147 ++++++++++++++++++++++++++++++
+ 5 files changed, 520 insertions(+), 5 deletions(-)
+
+diff --git a/docs/examples.md b/docs/examples.md
+index 4c35ae3..b8c98c0 100644
+--- a/docs/examples.md
++++ b/docs/examples.md
+@@ -43,3 +43,9 @@ python examples/semantic_linter.py pyjev/client.py --json
+ > Batch independent semantic questions about one state into one Jev request; use ordinary async concurrency across independent states.
+
+ The default threshold is a demo application policy, not a Jev correctness guarantee. Calibrate it against labeled examples before using this linter as a CI gate. The selected function source is sent to the configured Jev API; do not run it on code you are not permitted to send to that service.
++
++## Emoji Jev
++
++`emoji_jev.py` is an interactive named-bundle example. A single request evaluates a 64-way emoji Choice plus tone questions. The terminal displays the selected emoji, top alternatives from the Choice probability distribution, typed side signals, request metadata, token usage, and client-observed round-trip time.
++
++The top-N display is deterministic Python over Jev's preserved probability distribution; it is not a second model call.
+diff --git a/examples/.pyjev.toml b/examples/.pyjev.toml
+index e2b52e9..b54412e 100644
+--- a/examples/.pyjev.toml
++++ b/examples/.pyjev.toml
+@@ -144,3 +144,132 @@ levels = [
+   "Frustrated but civil",
+   "Very angry",
+ ]
++
++[decision.emoji-jev]
++type = "bundle"
++model = "jev-latest"
++
++[decision.emoji-jev.questions.emoji]
++type = "choice"
++question = "Which emoji best matches the meaning, tone, and likely conversational use of this message?"
++
++[decision.emoji-jev.questions.emoji.options]
++grinning = "happy, cheerful, good news"
++joy_tears = "laughing hard, hilarious, can't stop laughing"
++rofl = "rolling on the floor laughing, absurdly funny"
++smiling_eyes = "warm, content, pleased"
++heart_eyes = "adoration, love at first sight, gorgeous"
++star_struck = "amazed, starstruck, wow"
++kiss = "affection, blowing a kiss, love you"
++yum = "delicious food, tasty, savouring"
++tongue_wink = "playful, silly, teasing"
++hugging = "hug, comfort, welcome, support"
++thinking = "pondering, unsure, considering"
++raised_eyebrow = "suspicious, skeptical, doubtful"
++neutral = "indifferent, meh, blank"
++smirk = "smug, flirty, knowing"
++unamused = "annoyed, unimpressed, bored"
++eye_roll = "exasperated, ugh, eye roll"
++grimace = "awkward, cringe, yikes"
++relieved = "relieved, calm, peaceful"
++pensive = "sad, wistful, disappointed"
++sleeping = "asleep, bedtime, snoring"
++mask = "sick, ill, flu, contagious"
++exploding_head = "mind blown, shocking revelation"
++partying = "party, birthday, celebration"
++sunglasses = "cool, confident, effortless"
++nerd = "nerdy, studying, technical detail"
++confused = "confused, unsure what happened"
++worried = "worried, concerned, anxious"
++flushed = "embarrassed, blushing, caught out"
++pleading = "please, begging, puppy eyes, touching"
++fearful = "scared, frightened, fear"
++anxious_sweat = "nervous, stressed, cold sweat"
++crying = "crying, sad, tearful"
++loudly_crying = "sobbing, devastated, ugly crying"
++screaming = "screaming in fear or shock, horror"
++disappointed = "disappointed, let down, dejected"
++weary = "weary, fed up, exhausted, ugh"
++tired_face = "tired, over it, can't anymore"
++yawning = "bored, yawning, dull"
++angry = "angry, mad, irritated"
++rage = "furious, enraged, livid"
++cursing = "swearing, extremely angry"
++smiling_imp = "mischievous, devilish, up to no good"
++skull = "dead, dying of laughter, or literally dead"
++clown = "clown, foolish, embarrassing behaviour"
++sweat_smile = "nervous laugh, phew, awkward relief"
++upside_down = "wry, ironic, this is fine, quietly losing it"
++smiling_tear = "bittersweet, happy but sad, touched"
++melting = "melting, overwhelmed, embarrassed, dying inside"
++holding_back_tears = "moved, grateful, about to cry from emotion"
++heart = "love, deep affection"
++broken_heart = "heartbreak, breakup, grief"
++fire = "fire, amazing, lit, hot take, literal fire"
++sparkles = "magic, sparkle, special, new and shiny"
++hundred = "100 percent, agree completely, perfect score"
++eyes = "watching, looking, suspicious interest, gossip"
++thumbs_up = "approval, ok, good job"
++clap = "applause, congratulations, well done"
++raised_hands = "hooray, praise, celebration"
++pray = "please, thank you, hoping, grateful"
++facepalm = "facepalm, disbelief at stupidity"
++shrug = "don't know, whatever, shrug"
++muscle = "strength, effort, gym, you can do it"
++party_popper = "celebration, congratulations, success"
++rocket = "launch, growth, to the moon, shipping"
++
++[decision.emoji-jev.questions.emotion]
++type = "choice"
++question = "What is the primary emotion expressed by this message?"
++
++[decision.emoji-jev.questions.emotion.options]
++joy = "happiness, delight, celebration"
++love = "affection, warmth, gratitude"
++surprise = "shock, amazement, did not expect that"
++sadness = "grief, disappointment, loss"
++anger = "frustration, irritation, outrage"
++fear = "worry, anxiety, dread"
++disgust = "revulsion, contempt, gross"
++neutral = "no strong emotion, matter of fact"
++
++[decision.emoji-jev.questions.mood]
++type = "score"
++question = "How positive or negative is the overall mood of this message?"
++levels = [
++  "devastated",
++  "down",
++  "neutral",
++  "upbeat",
++  "ecstatic",
++]
++
++[decision.emoji-jev.questions.urgency]
++type = "score"
++question = "How urgently does this message appear to need attention or action?"
++levels = [
++  "no rush",
++  "soon",
++  "right now",
++]
++
++[decision.emoji-jev.questions.energy]
++type = "score"
++question = "How much expressive energy does this message carry?"
++levels = [
++  "flat",
++  "steady",
++  "buzzing",
++]
++
++[decision.emoji-jev.questions.wants-reply]
++type = "noul"
++question = "This message appears to want or invite a reply."
++
++[decision.emoji-jev.questions.sarcasm]
++type = "noul"
++question = "This message is sarcastic or intentionally ironic."
++
++[decision.emoji-jev.questions.joke]
++type = "noul"
++question = "This message is intended as a joke or humorous remark."
+diff --git a/examples/README.md b/examples/README.md
+index d857d04..68ff8ce 100644
+--- a/examples/README.md
++++ b/examples/README.md
+@@ -10,6 +10,7 @@ python examples/emergency_snack.py
+ python examples/haunted_ci.py
+ python examples/connect_four.py
+ python examples/support_triage.py
++python examples/emoji_jev.py
+ python examples/semantic_linter.py pyjev/client.py
+ python examples/semantic_linter.py pyjev --threshold 0.80
+ python examples/semantic_linter.py pyjev/client.py --show-all
+@@ -45,11 +46,12 @@ free-form text.
+ - `support_triage.py` combines intent routing, composite scoring, confidence-gated actions, and speculative fan-out. The `support-triage` bundle asks all six questions in one request, then ordinary Python chooses the handler. Child confidence remains visible, branch-irrelevant answers are ignored, and the printed attention score uses caller-owned normalization and weights.
+   The example is intentionally explainable rather than prescriptive. Thresholds and weights are application policy, and confidence is not a correctness probability.
+
+-This split is intentional. Jev is used as a judgment/decision model, not as a
+-Connect Four board parser or deterministic rules engine. Giving the model
+-precomputed facts makes the decision interface stronger and keeps exact logic in
+-ordinary Python.
+-The examples intentionally show the boundary between Jev/TypeSafe and pyjev:
++- `emoji_jev.py` is an interactive named-bundle example. Each non-empty message is one request containing a 64-way emoji Choice and side questions for emotion, mood, urgency, energy, reply intent, sarcasm, and jokes. The selected emoji comes from the Choice value, while the same preserved probability distribution supplies the top alternatives. Runtime output includes available token counts, model, request ID, and client-observed elapsed time. No free-form model prose is parsed: Jev supplies typed results, and ordinary Python ranks and formats them.
++  This split is intentional. Jev is used as a judgment/decision model, not as a
++  Connect Four board parser or deterministic rules engine. Giving the model
++  precomputed facts makes the decision interface stronger and keeps exact logic in
++  ordinary Python.
++  The examples intentionally show the boundary between Jev/TypeSafe and pyjev:
+
+ - TypeSafe supplies state evaluation, Choice and Score semantics, the selected answer
+   or score, probabilities, confidence, and model response metadata.
+diff --git a/examples/emoji_jev.py b/examples/emoji_jev.py
+new file mode 100644
+index 0000000..6e6dbb4
+--- /dev/null
++++ b/examples/emoji_jev.py
+@@ -0,0 +1,231 @@
++"""Interactive Emoji Jev example using one named bundle per message."""
++
++from __future__ import annotations
++
++from dataclasses import dataclass
++from pathlib import Path
++from time import perf_counter
++from typing import Any
++
++from pyjev import BundleResult, ChoiceResult, Jev, NoulResult, ScoreResult
++
++CONFIG = Path(__file__).with_name(".pyjev.toml")
++DECISION = "emoji-jev"
++TOP_PICKS = 5
++
++EMOJI = {
++    "grinning": "😀",
++    "joy_tears": "😂",
++    "rofl": "🤣",
++    "smiling_eyes": "😊",
++    "heart_eyes": "😍",
++    "star_struck": "🤩",
++    "kiss": "😘",
++    "yum": "😋",
++    "tongue_wink": "😜",
++    "hugging": "🤗",
++    "thinking": "🤔",
++    "raised_eyebrow": "🤨",
++    "neutral": "😐",
++    "smirk": "😏",
++    "unamused": "😒",
++    "eye_roll": "🙄",
++    "grimace": "😬",
++    "relieved": "😌",
++    "pensive": "😔",
++    "sleeping": "😴",
++    "mask": "😷",
++    "exploding_head": "🤯",
++    "partying": "🥳",
++    "sunglasses": "😎",
++    "nerd": "🤓",
++    "confused": "😕",
++    "worried": "😟",
++    "flushed": "😳",
++    "pleading": "🥺",
++    "fearful": "😨",
++    "anxious_sweat": "😰",
++    "crying": "😢",
++    "loudly_crying": "😭",
++    "screaming": "😱",
++    "disappointed": "😞",
++    "weary": "😩",
++    "tired_face": "😫",
++    "yawning": "🥱",
++    "angry": "😠",
++    "rage": "😡",
++    "cursing": "🤬",
++    "smiling_imp": "😈",
++    "skull": "💀",
++    "clown": "🤡",
++    "sweat_smile": "😅",
++    "upside_down": "🙃",
++    "smiling_tear": "🥲",
++    "melting": "🫠",
++    "holding_back_tears": "🥹",
++    "heart": "❤️",
++    "broken_heart": "💔",
++    "fire": "🔥",
++    "sparkles": "✨",
++    "hundred": "💯",
++    "eyes": "👀",
++    "thumbs_up": "👍",
++    "clap": "👏",
++    "raised_hands": "🙌",
++    "pray": "🙏",
++    "facepalm": "🤦",
++    "shrug": "🤷",
++    "muscle": "💪",
++    "party_popper": "🎉",
++    "rocket": "🚀",
++}
++
++
++@dataclass(frozen=True, slots=True)
++class EmojiReport:
++    result: BundleResult
++    elapsed_ms: float
++
++
++def _answers(
++    result: BundleResult,
++) -> tuple[
++    ChoiceResult,
++    ChoiceResult,
++    ScoreResult,
++    ScoreResult,
++    ScoreResult,
++    NoulResult,
++    NoulResult,
++    NoulResult,
++]:
++    emoji = result.answers["emoji"]
++    emotion = result.answers["emotion"]
++    mood = result.answers["mood"]
++    urgency = result.answers["urgency"]
++    energy = result.answers["energy"]
++    wants_reply = result.answers["wants-reply"]
++    sarcasm = result.answers["sarcasm"]
++    joke = result.answers["joke"]
++    values = (
++        ("emoji", emoji, ChoiceResult),
++        ("emotion", emotion, ChoiceResult),
++        ("mood", mood, ScoreResult),
++        ("urgency", urgency, ScoreResult),
++        ("energy", energy, ScoreResult),
++        ("wants-reply", wants_reply, NoulResult),
++        ("sarcasm", sarcasm, NoulResult),
++        ("joke", joke, NoulResult),
++    )
++    for name, value, expected_type in values:
++        if not isinstance(value, expected_type):
++            raise TypeError(f"{name} must be {expected_type.__name__}, got {type(value).__name__}")
++    return emoji, emotion, mood, urgency, energy, wants_reply, sarcasm, joke
++
++
++def analyze_text(jev: Jev, text: str) -> EmojiReport:
++    """Analyze one message with one named bundle request."""
++    started = perf_counter()
++    result = jev.decide(DECISION, state={"text": text}, config=CONFIG)
++    elapsed_ms = (perf_counter() - started) * 1000.0
++    if not isinstance(result, BundleResult):
++        raise TypeError(f"Expected BundleResult, got {type(result).__name__}")
++    return EmojiReport(result=result, elapsed_ms=elapsed_ms)
++
++
++def top_emoji_picks(
++    result: ChoiceResult,
++    *,
++    limit: int = TOP_PICKS,
++) -> list[tuple[str, str, float]]:
++    """Return the highest-probability emoji choices in deterministic order."""
++    ranked = sorted(result.probabilities.items(), key=lambda item: item[1], reverse=True)
++    return [(key, EMOJI.get(key, "�"), probability) for key, probability in ranked[:limit]]
++
++
++def nearest_score_label(result: ScoreResult) -> str:
++    """Return the nearest ordered legend label for display."""
++    level = min(result.legend, key=lambda item: abs(item - result.value))
++    return str(result.legend[level])
++
++
++def usage_value(usage: dict[str, Any], *names: str) -> Any | None:
++    """Read the first available usage key."""
++    for name in names:
++        if name in usage:
++            return usage[name]
++    return None
++
++
++def _print_score(name: str, result: ScoreResult) -> None:
++    maximum = max(result.legend)
++    print(
++        f"  {name:<10} {result.value:>4.2f} / {maximum}  ~ "
++        f"{nearest_score_label(result):<12} confidence={result.confidence:.2f}",
++    )
++
++
++def print_report(report: EmojiReport) -> None:
++    """Print the structured result and client-observed request metadata."""
++    emoji, emotion, mood, urgency, energy, wants_reply, sarcasm, joke = _answers(report.result)
++    primary = EMOJI.get(emoji.value, "�")
++    print(f"\n{primary}  {emoji.value}")
++    print("\ntop emoji picks")
++    for key, char, probability in top_emoji_picks(emoji):
++        selected = "  <-- selected" if key == emoji.value else ""
++        print(f"  {char} {key:<20} {probability * 100:>5.1f}%{selected}")
++
++    print("\ntone")
++    print(f"  {'emotion':<10} {emotion.value:<16} confidence={emotion.confidence:.2f}")
++    _print_score("mood", mood)
++    _print_score("urgency", urgency)
++    _print_score("energy", energy)
++    print(f"  {'reply':<10} {wants_reply.value:.2f}")
++    print(f"  {'sarcasm':<10} {sarcasm.value:.2f}")
++    print(f"  {'joke':<10} {joke.value:.2f}")
++
++    usage = report.result.usage
++    print("\nrequest")
++    print(f"  {'emoji confidence':<18} {emoji.confidence:.2f}")
++    print(f"  {'round trip':<18} {report.elapsed_ms:.0f} ms")
++    print(f"  {'model':<18} {report.result.model}")
++    if report.result.request_id:
++        print(f"  {'request_id':<18} {report.result.request_id}")
++    for label, names in (
++        ("input tokens", ("input_tokens", "inputTokens")),
++        ("output tokens", ("output_tokens", "outputTokens")),
++        ("total tokens", ("total_tokens", "totalTokens")),
++    ):
++        value = usage_value(usage, *names)
++        if value is not None:
++            print(f"  {label:<18} {value}")
++
++
++def main() -> None:
++    print("=== Emoji Jev ===")
++    print("Type a message and Jev will classify it into emoji + tone signals.")
++    print("One input = one Jev bundle request.")
++    print("Commands: q / quit / exit\n")
++
++    with Jev() as jev:
++        while True:
++            try:
++                text = input("you> ").strip()
++            except (EOFError, KeyboardInterrupt):
++                print("\nbye")
++                return
++
++            if text.lower() in {"q", "quit", "exit"}:
++                print("bye")
++                return
++            if not text:
++                continue
++
++            try:
++                print_report(analyze_text(jev, text))
++            except Exception as exc:
++                print(f"error: {type(exc).__name__}: {exc}")
++
++
++if __name__ == "__main__":
++    main()
+diff --git a/tests/test_emoji_jev.py b/tests/test_emoji_jev.py
+new file mode 100644
+index 0000000..bb73eed
+--- /dev/null
++++ b/tests/test_emoji_jev.py
+@@ -0,0 +1,147 @@
++from __future__ import annotations
++
++from pathlib import Path
++
++from examples.emoji_jev import (
++    CONFIG,
++    EMOJI,
++    EmojiReport,
++    analyze_text,
++    nearest_score_label,
++    print_report,
++    top_emoji_picks,
++)
++from pyjev import BundleResult, ChoiceResult, NoulResult, ScoreResult
++from pyjev.decisions import BundleDecision, ChoiceDecision, NoulDecision, ScoreDecision, load_decision
++
++EXPECTED_QUESTIONS = {
++    "emoji",
++    "emotion",
++    "mood",
++    "urgency",
++    "energy",
++    "wants-reply",
++    "sarcasm",
++    "joke",
++}
++
++
++def make_bundle() -> BundleResult:
++    return BundleResult(
++        answers={
++            "emoji": ChoiceResult(
++                value="rocket",
++                confidence=0.81,
++                probabilities={"rocket": 0.51, "fire": 0.31, "party_popper": 0.18},
++                model="test",
++                usage={"input_tokens": 10},
++                raw={},
++            ),
++            "emotion": ChoiceResult(
++                value="joy",
++                confidence=0.79,
++                probabilities={"joy": 0.79, "neutral": 0.21},
++                model="test",
++                usage={},
++                raw={},
++            ),
++            "mood": ScoreResult(
++                value=3.42,
++                confidence=0.63,
++                probabilities={0: 0.01, 1: 0.04, 2: 0.2, 3: 0.5, 4: 0.25},
++                legend={0: "devastated", 1: "down", 2: "neutral", 3: "upbeat", 4: "ecstatic"},
++                model="test",
++                usage={},
++                raw={},
++            ),
++            "urgency": ScoreResult(
++                value=1.71,
++                confidence=0.82,
++                probabilities={0: 0.1, 1: 0.2, 2: 0.7},
++                legend={0: "no rush", 1: "soon", 2: "right now"},
++                model="test",
++                usage={},
++                raw={},
++            ),
++            "energy": ScoreResult(
++                value=1.83,
++                confidence=0.88,
++                probabilities={0: 0.1, 1: 0.2, 2: 0.7},
++                legend={0: "flat", 1: "steady", 2: "buzzing"},
++                model="test",
++                usage={},
++                raw={},
++            ),
++            "wants-reply": NoulResult(value=0.26, model="test", usage={}, raw={}),
++            "sarcasm": NoulResult(value=0.07, model="test", usage={}, raw={}),
++            "joke": NoulResult(value=0.22, model="test", usage={}, raw={}),
++        },
++        model="test",
++        usage={"input_tokens": 812, "output_tokens": 7, "total_tokens": 819},
++        raw={},
++        request_id="req-test",
++    )
++
++
++def test_configuration_contract() -> None:
++    decision = load_decision("emoji-jev", CONFIG)
++    assert isinstance(decision, BundleDecision)
++    assert set(decision.questions) == EXPECTED_QUESTIONS
++
++    emoji = decision.questions["emoji"]
++    assert isinstance(emoji, ChoiceDecision)
++    assert len(emoji.options) == 64
++    assert set(emoji.options) == set(EMOJI)
++
++    assert isinstance(decision.questions["emotion"], ChoiceDecision)
++    assert isinstance(decision.questions["mood"], ScoreDecision)
++    assert isinstance(decision.questions["urgency"], ScoreDecision)
++    assert isinstance(decision.questions["energy"], ScoreDecision)
++    assert isinstance(decision.questions["wants-reply"], NoulDecision)
++    assert isinstance(decision.questions["sarcasm"], NoulDecision)
++    assert isinstance(decision.questions["joke"], NoulDecision)
++    assert len(decision.questions["mood"].levels) == 5
++    assert len(decision.questions["urgency"].levels) == 3
++    assert len(decision.questions["energy"].levels) == 3
++
++
++def test_top_emoji_picks_are_sorted_and_mapped() -> None:
++    result = make_bundle().answers["emoji"]
++    assert isinstance(result, ChoiceResult)
++    assert top_emoji_picks(result) == [
++        ("rocket", "🚀", 0.51),
++        ("fire", "🔥", 0.31),
++        ("party_popper", "🎉", 0.18),
++    ]
++
++
++def test_nearest_score_label_preserves_fractional_value() -> None:
++    result = make_bundle().answers["mood"]
++    assert isinstance(result, ScoreResult)
++    original = result.value
++    assert nearest_score_label(result) == "upbeat"
++    assert result.value == original == 3.42
++
++
++def test_analyze_text_makes_one_bundle_request() -> None:
++    class FakeJev:
++        def __init__(self) -> None:
++            self.calls: list[tuple[str, dict[str, str], Path | None]] = []
++
++        def decide(self, name: str, *, state: dict[str, str], config: Path | None = None) -> BundleResult:
++            self.calls.append((name, state, config))
++            return make_bundle()
++
++    jev = FakeJev()
++    report = analyze_text(jev, "shipped it")  # type: ignore[arg-type]
++
++    assert isinstance(report, EmojiReport)
++    assert len(jev.calls) == 1
++    assert jev.calls[0] == ("emoji-jev", {"text": "shipped it"}, CONFIG)
++
++
++def test_print_report_has_human_readable_sections(capsys) -> None:
++    print_report(EmojiReport(result=make_bundle(), elapsed_ms=93.0))
++    output = capsys.readouterr().out
++    for phrase in ("top emoji picks", "tone", "request", "emoji confidence", "round trip", "model"):
++        assert phrase in output

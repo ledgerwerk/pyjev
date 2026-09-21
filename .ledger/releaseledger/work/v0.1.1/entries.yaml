@@ -1,0 +1,116 @@
+schema: releaseledger.entry-batch.v1
+operation: create
+schema_version: 1
+object_type: release_entry_batch
+release_version: v0.1.1
+git_base_ref: f0a03f3a5b71ae32166ca602bfe97596b1feb498
+git_base_sha: f0a03f3a5b71ae32166ca602bfe97596b1feb498
+git_head_ref: a4e4f2b8e9f2dfd5023a08d2a1d42896e023955b
+git_head_sha: a4e4f2b8e9f2dfd5023a08d2a1d42896e023955b
+include_merges: nontrivial
+entries:
+  - kind: added
+    summary: "Added named decision contracts, offline compilation, async support, safe authentication checks, and agent guidance"
+    status: accepted
+    source_refs:
+      - git:91a3375e129229ba6163ed7ccc72179cddee0039
+    paths:
+      - README.md
+      - docs/agent-skill.md
+      - docs/authentication.md
+      - docs/cli.md
+      - docs/comparisons.md
+      - docs/confidence.md
+      - docs/getting-started.md
+      - docs/index.md
+      - docs/named-decisions.md
+      - docs/python-api.md
+      - pyjev/cli.py
+      - pyjev/client.py
+      - pyjev/compile.py
+      - pyjev/decisions.py
+      - pyproject.toml
+      - skills/pyjev/SKILL.md
+      - tests/test_cli.py
+      - tests/test_client.py
+      - tests/test_compile.py
+      - tests/test_docs.py
+    sources:
+      - git:91a3375e129229ba6163ed7ccc72179cddee0039
+    prs: []
+    issues: []
+    contributors:
+      - "@holgern"
+  - kind: added
+    summary: "Added an async semantic linter example that batches fourteen rules per function and reports structured findings"
+    status: accepted
+    source_refs:
+      - git:7ec851f65b0ed224ebda1d9dee8d2e0135ba84bd
+    paths:
+      - docs/examples.md
+      - examples/.pyjev.toml
+      - examples/README.md
+      - examples/semantic_linter.py
+      - tests/test_semantic_linter.py
+    sources:
+      - git:7ec851f65b0ed224ebda1d9dee8d2e0135ba84bd
+    prs: []
+    issues: []
+    contributors:
+      - "@holgern"
+  - kind: added
+    summary: "Added documented decision patterns and a support-triage example for routing, scoring, confidence gates, and fan-out"
+    status: accepted
+    source_refs:
+      - git:4735da1e1114f81386ce1cc4c992a0c27009eb2c
+    paths:
+      - README.md
+      - docs/index.md
+      - docs/patterns.md
+      - examples/.pyjev.toml
+      - examples/README.md
+      - examples/support_triage.py
+      - tests/test_docs.py
+      - tests/test_support_triage.py
+    sources:
+      - git:4735da1e1114f81386ce1cc4c992a0c27009eb2c
+    prs: []
+    issues: []
+    contributors:
+      - "@holgern"
+  - kind: added
+    summary: "Added an interactive emoji analysis example using one typed bundle request per message"
+    status: accepted
+    source_refs:
+      - git:f33582fabbcbbf501785e78d147040b3b0a116d3
+    paths:
+      - docs/examples.md
+      - examples/.pyjev.toml
+      - examples/README.md
+      - examples/emoji_jev.py
+      - tests/test_emoji_jev.py
+    sources:
+      - git:f33582fabbcbbf501785e78d147040b3b0a116d3
+    prs: []
+    issues: []
+    contributors:
+      - "@holgern"
+  - kind: added
+    summary: "Added local result pipelines for selecting bundle answers and applying confidence or probability gates"
+    status: accepted
+    source_refs:
+      - git:a4e4f2b8e9f2dfd5023a08d2a1d42896e023955b
+    paths:
+      - README.md
+      - docs/confidence.md
+      - docs/patterns.md
+      - docs/python-api.md
+      - pyjev/__init__.py
+      - pyjev/pipeline.py
+      - tests/test_pipeline.py
+    sources:
+      - git:a4e4f2b8e9f2dfd5023a08d2a1d42896e023955b
+    prs: []
+    issues: []
+    contributors:
+      - "@holgern"

@@ -1,0 +1,205 @@
+schema_version: 1
+object_type: commit_audit_sheet
+versioning:
+  schema_version: 1
+  revision: 3
+release_version: v0.1.1
+git_base_ref: v0.1.0
+git_base_sha: f0a03f3a5b71ae32166ca602bfe97596b1feb498
+git_head_ref: HEAD
+git_head_sha: a4e4f2b8e9f2dfd5023a08d2a1d42896e023955b
+git_range: f0a03f3a5b71ae32166ca602bfe97596b1feb498..a4e4f2b8e9f2dfd5023a08d2a1d42896e023955b
+commit_count: 5
+rows:
+  - sha: 91a3375e129229ba6163ed7ccc72179cddee0039
+    source_ref: git:91a3375e129229ba6163ed7ccc72179cddee0039
+    short_sha: 91a3375
+    changed_paths:
+      - README.md
+      - docs/agent-skill.md
+      - docs/authentication.md
+      - docs/cli.md
+      - docs/comparisons.md
+      - docs/confidence.md
+      - docs/getting-started.md
+      - docs/index.md
+      - docs/named-decisions.md
+      - docs/python-api.md
+      - pyjev/cli.py
+      - pyjev/client.py
+      - pyjev/compile.py
+      - pyjev/decisions.py
+      - pyproject.toml
+      - skills/pyjev/SKILL.md
+      - tests/test_cli.py
+      - tests/test_client.py
+      - tests/test_compile.py
+      - tests/test_docs.py
+    stats:
+      files_changed: 20
+      insertions: 832
+      deletions: 124
+    inspected: true
+    inspected_paths:
+      - README.md
+      - docs/agent-skill.md
+      - docs/authentication.md
+      - docs/cli.md
+      - docs/comparisons.md
+      - docs/confidence.md
+      - docs/getting-started.md
+      - docs/index.md
+      - docs/named-decisions.md
+      - docs/python-api.md
+      - pyjev/cli.py
+      - pyjev/client.py
+      - pyjev/compile.py
+      - pyjev/decisions.py
+      - pyproject.toml
+      - skills/pyjev/SKILL.md
+      - tests/test_cli.py
+      - tests/test_client.py
+      - tests/test_compile.py
+      - tests/test_docs.py
+    observed_behavior:
+      Introduces reusable .pyjev.toml named decisions with offline
+      validation and compilation, native async client support, credential-safe auth
+      checks, and bundled agent guidance; tests cover the CLI, client, compiler, and
+      documentation contracts.
+    public_impact: public
+    decision: accepted
+    stale: false
+    evidence_subject: "feat: add skill and improved doc"
+    target_entry_id: entry-0001
+    notes: ""
+  - sha: 7ec851f65b0ed224ebda1d9dee8d2e0135ba84bd
+    source_ref: git:7ec851f65b0ed224ebda1d9dee8d2e0135ba84bd
+    short_sha: 7ec851f
+    changed_paths:
+      - docs/examples.md
+      - examples/.pyjev.toml
+      - examples/README.md
+      - examples/semantic_linter.py
+      - tests/test_semantic_linter.py
+    stats:
+      files_changed: 5
+      insertions: 745
+      deletions: 0
+    inspected: true
+    inspected_paths:
+      - docs/examples.md
+      - examples/.pyjev.toml
+      - examples/README.md
+      - examples/semantic_linter.py
+      - tests/test_semantic_linter.py
+    observed_behavior:
+      Adds an AST-based semantic linter that extracts Python functions,
+      evaluates fourteen Noul rules per function with bounded async concurrency, and
+      emits human and JSON reports; tests cover parsing, counts, concurrency, and failures.
+    public_impact: public
+    decision: accepted
+    stale: false
+    evidence_subject: "feat: new example"
+    target_entry_id: entry-0002
+    notes: ""
+  - sha: 4735da1e1114f81386ce1cc4c992a0c27009eb2c
+    source_ref: git:4735da1e1114f81386ce1cc4c992a0c27009eb2c
+    short_sha: 4735da1
+    changed_paths:
+      - README.md
+      - docs/index.md
+      - docs/patterns.md
+      - examples/.pyjev.toml
+      - examples/README.md
+      - examples/support_triage.py
+      - tests/test_docs.py
+      - tests/test_support_triage.py
+    stats:
+      files_changed: 8
+      insertions: 598
+      deletions: 0
+    inspected: true
+    inspected_paths:
+      - README.md
+      - docs/index.md
+      - docs/patterns.md
+      - examples/.pyjev.toml
+      - examples/README.md
+      - examples/support_triage.py
+      - tests/test_docs.py
+      - tests/test_support_triage.py
+    observed_behavior:
+      Adds decision-pattern documentation and a support-triage bundle
+      example covering intent routing, composite scores, confidence thresholds, and
+      speculative fan-out; tests and documentation assertions cover the new workflow.
+    public_impact: public
+    decision: accepted
+    stale: false
+    evidence_subject: "feat: decision patterns"
+    target_entry_id: entry-0003
+    notes: ""
+  - sha: f33582fabbcbbf501785e78d147040b3b0a116d3
+    source_ref: git:f33582fabbcbbf501785e78d147040b3b0a116d3
+    short_sha: f33582f
+    changed_paths:
+      - docs/examples.md
+      - examples/.pyjev.toml
+      - examples/README.md
+      - examples/emoji_jev.py
+      - tests/test_emoji_jev.py
+    stats:
+      files_changed: 5
+      insertions: 520
+      deletions: 5
+    inspected: true
+    inspected_paths:
+      - docs/examples.md
+      - examples/.pyjev.toml
+      - examples/README.md
+      - examples/emoji_jev.py
+      - tests/test_emoji_jev.py
+    observed_behavior:
+      Adds an interactive emoji-analysis example using one typed bundle
+      request per message, deterministic top picks, score labels, and request metadata;
+      tests cover its configuration and report helpers.
+    public_impact: public
+    decision: accepted
+    stale: false
+    evidence_subject: "feat: emoji example"
+    target_entry_id: entry-0004
+    notes: ""
+  - sha: a4e4f2b8e9f2dfd5023a08d2a1d42896e023955b
+    source_ref: git:a4e4f2b8e9f2dfd5023a08d2a1d42896e023955b
+    short_sha: a4e4f2b
+    changed_paths:
+      - README.md
+      - docs/confidence.md
+      - docs/patterns.md
+      - docs/python-api.md
+      - pyjev/__init__.py
+      - pyjev/pipeline.py
+      - tests/test_pipeline.py
+    stats:
+      files_changed: 7
+      insertions: 505
+      deletions: 0
+    inspected: true
+    inspected_paths:
+      - README.md
+      - docs/confidence.md
+      - docs/patterns.md
+      - docs/python-api.md
+      - pyjev/__init__.py
+      - pyjev/pipeline.py
+      - tests/test_pipeline.py
+    observed_behavior:
+      Adds immutable local result-pipeline stages for selecting bundle
+      answers and applying confidence or probability gates, preserving accepted or rejected
+      evidence without network access; tests cover thresholds, incompatible types, and
+      composition.
+    public_impact: public
+    decision: accepted
+    stale: false
+    evidence_subject: "feat: add pipeline operator"
+    target_entry_id: entry-0005
+    notes: ""

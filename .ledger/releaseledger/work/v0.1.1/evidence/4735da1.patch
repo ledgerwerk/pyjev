@@ -1,0 +1,703 @@
+ README.md                    |   6 ++
+ docs/index.md                |   2 +
+ docs/patterns.md             | 198 +++++++++++++++++++++++++++++++++++++++++++
+ examples/.pyjev.toml         |  50 +++++++++++
+ examples/README.md           |   4 +
+ examples/support_triage.py   | 166 ++++++++++++++++++++++++++++++++++++
+ tests/test_docs.py           |   9 ++
+ tests/test_support_triage.py | 163 +++++++++++++++++++++++++++++++++++
+ 8 files changed, 598 insertions(+)
+
+diff --git a/README.md b/README.md
+index 37bcc2a..c8f39a7 100644
+--- a/README.md
++++ b/README.md
+@@ -22,6 +22,12 @@ confidence-gated automation.
+ - **Application policy:** confidence gates make the caller's automation threshold explicit and shell-safe.
+ - **Official transport boundary:** TypeSafe's SDK owns API models, transport, retries, authentication, and API semantics; pyjev adds application-level structure.
+
++## Decision patterns
++
++`pyjev` supports intent routing, composite scoring, confidence-gated automation, and speculative fan-out by combining typed Jev questions with explicit Python policy. Named bundles evaluate several independent questions about one state in a single request, and result wrappers preserve each answer's uncertainty so application code can gate, combine, ignore, or route deterministically.
++
++Keep normalization and weights in application code. Gate the result that controls the action. A bundle deliberately has no aggregate confidence because its child judgments can have different uncertainty and consequences. See the [decision patterns guide](docs/patterns.md) and run `python examples/support_triage.py` for a combined example.
++
+ The `pyjev` command is an interface to these library and decision-contract
+ capabilities. It is useful in shell and CI, but direct primitive commands are
+ not the whole product.
+diff --git a/docs/index.md b/docs/index.md
+index 4912917..f87bd59 100644
+--- a/docs/index.md
++++ b/docs/index.md
+@@ -71,6 +71,7 @@ concepts
+ python-api
+ cli
+ named-decisions
++patterns
+ confidence
+ authentication
+ agent-skill
+@@ -84,6 +85,7 @@ changelog
+
+ - [Getting started](getting-started.md)
+ - [Named decisions](named-decisions.md)
++- [Decision patterns](patterns.md)
+ - [Python API](python-api.md)
+ - [CLI and exit codes](cli.md)
+ - [Confidence policy](confidence.md)
+diff --git a/docs/patterns.md b/docs/patterns.md
+new file mode 100644
+index 0000000..ee0526d
+--- /dev/null
++++ b/docs/patterns.md
+@@ -0,0 +1,198 @@
++# Decision patterns
++
++`pyjev` supports common decision patterns by combining typed Jev judgments with
++ordinary Python policy. Jev evaluates ambiguous questions. The application then
++uses the structured results to route work, combine signals, gate automation, or
++ignore answers that are not relevant to the selected branch.
++
++The boundary is intentional:
++
++- TypeSafe and Jev provide model evaluation, typed question semantics, result
++  probabilities, confidence, and request metadata.
++- `pyjev` provides reusable decision declarations, bundles, typed result
++  wrappers, offline inspection, and access to preserved uncertainty.
++- Application code owns deterministic facts, thresholds, normalization, weights,
++  handlers, side effects, and business policy.
++
++## Intent routing
++
++Use a `Choice` question for the intent and route from its selected value. Add
++`Score` or `Noul` questions when a branch needs extra signals.
++
++```toml
++[decision.ticket-router]
++type = "bundle"
++
++[decision.ticket-router.questions.intent]
++type = "choice"
++question = "What is the primary intent of this customer message?"
++
++[decision.ticket-router.questions.intent.options]
++order_status = "Asking about an existing order"
++product_question = "Asking about a product before buying"
++return_exchange = "Wants to return or exchange something"
++complaint = "Unhappy with the experience and wants resolution"
++
++[decision.ticket-router.questions.complexity]
++type = "score"
++question = "How complex is this request to resolve?"
++levels = [
++  "Simple lookup or standard procedure",
++  "Requires judgment or a multi-step process",
++  "Unusual situation, edge case, or escalation needed",
++]
++```
++
++The bundle is evaluated once, and Python chooses the handler:
++
++```python
++from pyjev import BundleResult, ChoiceResult, Jev, ScoreResult
++
++with Jev() as jev:
++    result = jev.decide("ticket-router", state={"message": message})
++
++assert isinstance(result, BundleResult)
++intent = result.answers["intent"]
++complexity = result.answers["complexity"]
++assert isinstance(intent, ChoiceResult)
++assert isinstance(complexity, ScoreResult)
++
++if intent.confidence < 0.50:
++    route_to_human()
++elif intent.value == "order_status":
++    handle_order_status()
++elif intent.value == "complaint" and complexity.value > 1:
++    route_to_human()
++else:
++    handle_intent(intent.value)
++```
++
++`pyjev` does not provide a handler registry or a generic router. Invoking a
++handler is application behavior, so the application keeps ownership of side
++effects, retries, and idempotency.
++
++## Composite scoring
++
++A bundle can ask for several independent `Score` dimensions in one request.
++Normalize and combine those dimensions in Python:
++
++```python
++weights = {
++    "python_depth": 0.40,
++    "leadership": 0.10,
++    "system_design": 0.40,
++    "generalist": 0.10,
++}
++
++composite = sum(
++    weights[name] * result.answers[name].value / (len(result.answers[name].legend) - 1)
++    for name in weights
++)
++```
++
++`ScoreResult.value` is the probability-weighted position over the ordered
++levels, so fractional values are expected. Keep normalization and weights in
++application code. They are deterministic policy and do not change the Jev
++request or belong in `.pyjev.toml` unless the project deliberately adopts a
++broader application-policy DSL.
++
++This keeps the model contract and the business ranking contract separate. The
++application can change weights, compare candidates, or define different
++policies without changing the atomic Jev questions.
++
++## Confidence-gated routing
++
++`ChoiceResult.confidence` and `ScoreResult.confidence` are preserved separately
++from the selected value and probability distribution. Use the signal for the
++specific action being considered, with thresholds appropriate to that action:
++
++```python
++result = jev.decide("banking-intent", state=command)
++
++if result.confidence < 0.60:
++    route_to_support()
++elif result.value == "check_balance":
++    show_balance()
++elif result.value == "approve_transfer" and result.confidence > 0.85:
++    approve_transfer()
++else:
++    ask_user_to_confirm()
++```
++
++Confidence is not a correctness probability. It is a model signal that the
++caller may use as part of an explicit policy. The CLI exposes
++`--min-confidence` for direct Choice and Score decisions and named primitive
++decisions. Python policy is the right place for different thresholds per
++consequence.
++
++Bundles deliberately have no aggregate confidence. A bundle may contain a
++high-confidence intent, a low-confidence severity, and another signal with a
++different consequence. Gate the child result that controls the action instead
++of inventing one bundle threshold. A `NoulResult` also has no Choice or Score
++confidence field; use its explicit probability value when that is the relevant
++policy signal.
++
++## Speculative fan-out
++
++A named bundle is the first-class speculative fan-out primitive. Put every
++potentially useful question in one bundle, send one request for the shared
++state, and consume only the answers relevant to the selected route.
++
++```toml
++[decision.ticket-triage]
++type = "bundle"
++
++[decision.ticket-triage.questions.category]
++type = "choice"
++question = "What is the category of this ticket?"
++
++[decision.ticket-triage.questions.category.options]
++bug = "Technical problem"
++billing = "Payment or refund problem"
++other = "Another support request"
++
++[decision.ticket-triage.questions.refund-requested]
++type = "noul"
++question = "The customer explicitly asks for a refund or credit."
++
++[decision.ticket-triage.questions.bug-severity]
++type = "score"
++question = "How severe is the technical issue?"
++levels = ["Minor", "Degraded", "Blocking"]
++```
++
++The application can inspect `category`, then use `bug-severity` only for a bug
++route and `refund-requested` only for a billing route. Unused answers remain
++available in `BundleResult` for diagnostics, but they do not affect a branch
++unless application code chooses to use them.
++
++`Jev.run()` and `AsyncJev.run()` remain lower-level dynamic fan-out escape
++hatches and return the SDK-shaped response dictionary. Use a named bundle when
++the question set is reusable and you want `BundleResult` with typed child
++wrappers. Do not silently change the dynamic `run()` return contract.
++
++## All four patterns together
++
++`examples/support_triage.py` combines the patterns in one support workflow. Its
++`support-triage` bundle asks for intent, complexity, severity, reproducibility,
++refund likelihood, and frustration before the route is known. The example then:
++
++1. gates low-confidence intent classifications to a human;
++2. sends order-status requests to a deterministic lookup;
++3. uses severity confidence, severity score, and reproducibility for bug
++   escalation;
++4. uses refund probability for billing policy;
++5. uses frustration as a cross-cutting priority flag;
++6. ignores speculative answers that do not control the selected route.
++
++The example prints the request and result metadata so the one-request fan-out
++and the separation between judgment and policy are visible.
++
++## Design boundaries
++
++Do not add a generic `jev.route()` handler framework, aggregate
++`bundle.confidence`, or composite weights to the named-decision schema merely to
++express these patterns. The reusable library contract is typed judgment plus
++preserved uncertainty. Routing, ranking, thresholds, normalization, and side
++effects are deterministic application policy and should remain explicit in
++Python.
+diff --git a/examples/.pyjev.toml b/examples/.pyjev.toml
+index 970020f..e2b52e9 100644
+--- a/examples/.pyjev.toml
++++ b/examples/.pyjev.toml
+@@ -94,3 +94,53 @@ question = "This function makes a consequential decision using a magic value or
+ [decision.semantic-lint.questions.unexplained-special-case]
+ type = "noul"
+ question = "This function contains a workaround or special case whose reason is not made clear."
++
++[decision.support-triage]
++type = "bundle"
++model = "jev-latest"
++
++[decision.support-triage.questions.intent]
++type = "choice"
++question = "What is the primary intent of this support request?"
++
++[decision.support-triage.questions.intent.options]
++order_status = "Asking about an existing order"
++billing = "Charge, invoice, refund, or subscription problem"
++bug_report = "Something appears broken or produces errors"
++feature_request = "Request for new functionality"
++account = "Login, permissions, profile, or security issue"
++
++[decision.support-triage.questions.complexity]
++type = "score"
++question = "How complex is this request to resolve?"
++levels = [
++  "Simple lookup or standard procedure",
++  "Requires judgment or a multi-step process",
++  "Unusual edge case or escalation needed",
++]
++
++[decision.support-triage.questions.bug-severity]
++type = "score"
++question = "How severe is the reported technical issue?"
++levels = [
++  "Cosmetic or negligible impact",
++  "Degraded functionality with workaround",
++  "Blocking issue with no workaround",
++]
++
++[decision.support-triage.questions.has-repro]
++type = "noul"
++question = "The request contains concrete steps that can reproduce the technical issue."
++
++[decision.support-triage.questions.refund-requested]
++type = "noul"
++question = "The customer explicitly asks for a refund or credit."
++
++[decision.support-triage.questions.frustration]
++type = "score"
++question = "How frustrated does the customer appear?"
++levels = [
++  "Calm",
++  "Frustrated but civil",
++  "Very angry",
++]
+diff --git a/examples/README.md b/examples/README.md
+index 511b08c..d857d04 100644
+--- a/examples/README.md
++++ b/examples/README.md
+@@ -9,6 +9,7 @@ Set `TYPESAFE_API_KEY` or run `pyjev auth set`, then run from the repository roo
+ python examples/emergency_snack.py
+ python examples/haunted_ci.py
+ python examples/connect_four.py
++python examples/support_triage.py
+ python examples/semantic_linter.py pyjev/client.py
+ python examples/semantic_linter.py pyjev --threshold 0.80
+ python examples/semantic_linter.py pyjev/client.py --show-all
+@@ -41,6 +42,9 @@ free-form text.
+
+   The selected function source is sent to the configured Jev API. Do not run the example on code you are not permitted to send to that service.
+
++- `support_triage.py` combines intent routing, composite scoring, confidence-gated actions, and speculative fan-out. The `support-triage` bundle asks all six questions in one request, then ordinary Python chooses the handler. Child confidence remains visible, branch-irrelevant answers are ignored, and the printed attention score uses caller-owned normalization and weights.
++  The example is intentionally explainable rather than prescriptive. Thresholds and weights are application policy, and confidence is not a correctness probability.
++
+ This split is intentional. Jev is used as a judgment/decision model, not as a
+ Connect Four board parser or deterministic rules engine. Giving the model
+ precomputed facts makes the decision interface stronger and keeps exact logic in
+diff --git a/examples/support_triage.py b/examples/support_triage.py
+new file mode 100644
+index 0000000..baf6a0d
+--- /dev/null
++++ b/examples/support_triage.py
+@@ -0,0 +1,166 @@
++"""Demonstrate routing, scoring, confidence gates, and fan-out in one bundle."""
++
++from __future__ import annotations
++
++import json
++from collections.abc import Mapping
++from dataclasses import dataclass
++from pathlib import Path
++from typing import Any
++
++from pyjev import BundleResult, ChoiceResult, Jev, NoulResult, ScoreResult
++
++CONFIG = Path(__file__).with_name(".pyjev.toml")
++DECISION = "support-triage"
++MIN_INTENT_CONFIDENCE = 0.50
++MIN_SEVERITY_CONFIDENCE = 0.50
++REFUND_PROBABILITY = 0.70
++REPRODUCIBILITY_PROBABILITY = 0.60
++PRIORITY_FRUSTRATION = 1.50
++TRIAGE_WEIGHTS = {
++    "complexity": 0.25,
++    "bug-severity": 0.50,
++    "frustration": 0.25,
++}
++STATE = {
++    "customer": "Mira",
++    "message": (
++        "Every checkout attempt returns a 500 error after the latest release. "
++        "The customer included a reproducible sequence and asks for a credit."
++    ),
++    "account": "acme-example",
++    "recent_changes": ["checkout validation", "payment provider timeout"],
++}
++
++
++@dataclass(frozen=True, slots=True)
++class TriageOutcome:
++    route: str
++    reason: str
++    priority: bool
++
++
++@dataclass(frozen=True, slots=True)
++class TriageReport:
++    result: BundleResult
++    outcome: TriageOutcome
++    attention_score: float
++
++
++def _answers(
++    result: BundleResult,
++) -> tuple[ChoiceResult, ScoreResult, ScoreResult, NoulResult, NoulResult, ScoreResult]:
++    intent = result.answers["intent"]
++    complexity = result.answers["complexity"]
++    severity = result.answers["bug-severity"]
++    repro = result.answers["has-repro"]
++    refund = result.answers["refund-requested"]
++    frustration = result.answers["frustration"]
++    if not isinstance(intent, ChoiceResult):
++        raise TypeError(f"intent must be ChoiceResult, got {type(intent).__name__}")
++    if not isinstance(complexity, ScoreResult):
++        raise TypeError(f"complexity must be ScoreResult, got {type(complexity).__name__}")
++    if not isinstance(severity, ScoreResult):
++        raise TypeError(f"bug-severity must be ScoreResult, got {type(severity).__name__}")
++    if not isinstance(repro, NoulResult):
++        raise TypeError(f"has-repro must be NoulResult, got {type(repro).__name__}")
++    if not isinstance(refund, NoulResult):
++        raise TypeError(f"refund-requested must be NoulResult, got {type(refund).__name__}")
++    if not isinstance(frustration, ScoreResult):
++        raise TypeError(f"frustration must be ScoreResult, got {type(frustration).__name__}")
++    return intent, complexity, severity, repro, refund, frustration
++
++
++def normalized_score(result: ScoreResult) -> float:
++    """Normalize an ordered Score to the inclusive range from zero to one."""
++    return result.value / max(result.legend)
++
++
++def composite_score(scores: Mapping[str, ScoreResult], weights: Mapping[str, float]) -> float:
++    """Apply caller-owned weights to normalized atomic scores."""
++    if set(scores) != set(weights):
++        raise ValueError("scores and weights must contain the same dimensions")
++    if not weights or abs(sum(weights.values()) - 1.0) > 1e-9:
++        raise ValueError("weights must be non-empty and sum to one")
++    return sum(weights[name] * normalized_score(scores[name]) for name in weights)
++
++
++def route_support(result: BundleResult) -> TriageOutcome:
++    """Apply deterministic application policy to a support-triage result."""
++    intent, _complexity, severity, repro, refund, frustration = _answers(result)
++    priority = frustration.value > PRIORITY_FRUSTRATION
++
++    if intent.confidence < MIN_INTENT_CONFIDENCE:
++        return TriageOutcome("human_review", "low-confidence intent classification", priority)
++
++    if intent.value == "order_status":
++        return TriageOutcome("order_lookup", "high-confidence order-status intent", priority)
++    if intent.value == "billing":
++        if refund.value > REFUND_PROBABILITY:
++            return TriageOutcome("billing_refund_review", "refund probability cleared the billing threshold", priority)
++        return TriageOutcome("billing_support", "billing intent without a likely refund", priority)
++    if intent.value == "bug_report":
++        if severity.confidence < MIN_SEVERITY_CONFIDENCE:
++            return TriageOutcome("human_review", "low-confidence bug severity", priority)
++        if severity.value > 1.5 and repro.value > REPRODUCIBILITY_PROBABILITY:
++            return TriageOutcome(
++                "engineering_escalation",
++                "high-confidence severe bug with reproducible steps",
++                priority,
++            )
++        return TriageOutcome("bug_backlog", "bug does not meet escalation policy", priority)
++    if intent.value == "feature_request":
++        return TriageOutcome("feature_intake", "feature-request intent", priority)
++    return TriageOutcome("account_support", "account-support intent", priority)
++
++
++def run_triage(
++    jev: Any,
++    *,
++    state: Mapping[str, Any],
++    config: str | Path = CONFIG,
++    model: str | None = None,
++    weights: Mapping[str, float] = TRIAGE_WEIGHTS,
++) -> TriageReport:
++    """Evaluate the bundle once, then apply only deterministic Python policy."""
++    result = jev.decide(DECISION, state=dict(state), config=config, model=model)
++    if not isinstance(result, BundleResult):
++        raise TypeError(f"Expected BundleResult, got {type(result).__name__}")
++    _intent, complexity, severity, _repro, _refund, frustration = _answers(result)
++    attention_score = composite_score(
++        {"complexity": complexity, "bug-severity": severity, "frustration": frustration},
++        weights,
++    )
++    return TriageReport(result, route_support(result), attention_score)
++
++
++def main() -> None:
++    print("=== Support Triage: Four Decision Patterns ===")
++    print("One Jev request asks all triage questions in parallel.")
++    print("Python then applies confidence gates and deterministic routing policy.\n")
++    print("State sent to Jev:")
++    print(json.dumps(STATE, indent=2))
++
++    with Jev() as jev:
++        report = run_triage(jev, state=STATE)
++
++    intent, complexity, severity, repro, refund, frustration = _answers(report.result)
++    print("\nStructured results:")
++    print(f"  intent:       {intent.value:<24} confidence={intent.confidence:.2f}")
++    print(f"  complexity:   {complexity.value:>5.2f}                 confidence={complexity.confidence:.2f}")
++    print(f"  bug severity: {severity.value:>5.2f}                 confidence={severity.confidence:.2f}")
++    print(f"  repro:        {repro.value:.2f}")
++    print(f"  refund:       {refund.value:.2f}                 (used only for billing routes)")
++    print(f"  frustration:  {frustration.value:.2f}")
++    print(f"  attention:    {report.attention_score:.2f}                 (caller-owned composite score)")
++    print(f"\nroute: {report.outcome.route}")
++    print(f"reason: {report.outcome.reason}")
++    print(f"priority flag: {'yes' if report.outcome.priority else 'no'}")
++    print("requests: 1")
++    print(f"model: {report.result.model}")
++    if report.result.request_id:
++        print(f"request_id: {report.result.request_id}")
++
++
++if __name__ == "__main__":
++    main()
+diff --git a/tests/test_docs.py b/tests/test_docs.py
+index 4549fda..1718a52 100644
+--- a/tests/test_docs.py
++++ b/tests/test_docs.py
+@@ -13,6 +13,7 @@ def test_documentation_tree_and_build_script_are_present() -> None:
+         "python-api.md",
+         "cli.md",
+         "named-decisions.md",
++        "patterns.md",
+         "confidence.md",
+         "authentication.md",
+         "agent-skill.md",
+@@ -33,6 +34,8 @@ def test_documentation_emphasizes_decision_contracts_and_boundaries() -> None:
+     readme = (ROOT / "README.md").read_text(encoding="utf-8")
+     comparison = (ROOT / "docs" / "comparisons.md").read_text(encoding="utf-8")
+     skill = (ROOT / "skills" / "pyjev" / "SKILL.md").read_text(encoding="utf-8")
++    patterns = (ROOT / "docs" / "patterns.md").read_text(encoding="utf-8")
++    examples = (ROOT / "examples" / "README.md").read_text(encoding="utf-8")
+     assert readme.index("decision contracts") < readme.index("Direct dynamic decisions")
+     assert "`typesafe-sdk`" in readme
+     assert "official" in readme
+@@ -40,3 +43,9 @@ def test_documentation_emphasizes_decision_contracts_and_boundaries() -> None:
+     assert "not interchangeable" in comparison
+     assert "pyjev decision compile" in skill
+     assert "confidence" in skill.lower()
++    assert "docs/patterns.md" in readme
++    assert "Intent routing" in patterns
++    assert "Composite scoring" in patterns
++    assert "Confidence-gated routing" in patterns
++    assert "Speculative fan-out" in patterns
++    assert "support_triage.py" in examples
+diff --git a/tests/test_support_triage.py b/tests/test_support_triage.py
+new file mode 100644
+index 0000000..e61d10d
+--- /dev/null
++++ b/tests/test_support_triage.py
+@@ -0,0 +1,163 @@
++from __future__ import annotations
++
++from pathlib import Path
++from typing import Any
++
++from examples.support_triage import (
++    CONFIG,
++    DECISION,
++    composite_score,
++    run_triage,
++)
++from pyjev import BundleResult, ChoiceResult, NoulResult, ScoreResult
++
++
++class FakeJev:
++    def __init__(self, result: BundleResult) -> None:
++        self.result = result
++        self.calls: list[tuple[str, dict[str, Any], Path | str, str | None]] = []
++
++    def decide(
++        self,
++        name: str,
++        *,
++        state: dict[str, Any],
++        config: Path | str,
++        model: str | None,
++    ) -> BundleResult:
++        self.calls.append((name, state, config, model))
++        return self.result
++
++
++def choice(value: str, confidence: float) -> ChoiceResult:
++    return ChoiceResult(
++        value=value,
++        confidence=confidence,
++        probabilities={value: 0.90, "other": 0.10},
++        model="fake-model",
++        usage={},
++        raw={"choice": value},
++    )
++
++
++def score(value: float, confidence: float) -> ScoreResult:
++    return ScoreResult(
++        value=value,
++        confidence=confidence,
++        probabilities={0: 0.1, 1: 0.2, 2: 0.7},
++        legend={0: "low", 1: "normal", 2: "high"},
++        model="fake-model",
++        usage={},
++        raw={"score": value},
++    )
++
++
++def noul(value: float) -> NoulResult:
++    return NoulResult(value=value, model="fake-model", usage={}, raw={"noul": value})
++
++
++def bundle(
++    *,
++    intent: str = "bug_report",
++    intent_confidence: float = 0.90,
++    severity: float = 2.0,
++    severity_confidence: float = 0.90,
++    repro: float = 0.80,
++    refund: float = 0.10,
++    frustration: float = 1.0,
++    complexity: float = 1.0,
++) -> BundleResult:
++    return BundleResult(
++        answers={
++            "intent": choice(intent, intent_confidence),
++            "complexity": score(complexity, 0.80),
++            "bug-severity": score(severity, severity_confidence),
++            "has-repro": noul(repro),
++            "refund-requested": noul(refund),
++            "frustration": score(frustration, 0.80),
++        },
++        model="fake-model",
++        usage={"input_tokens": 1},
++        raw={},
++        request_id="request-1",
++    )
++
++
++def test_one_bundle_request_preserves_typed_children_and_escalates_bug() -> None:
++    fake = FakeJev(bundle())
++    report = run_triage(fake, state={"message": "checkout fails"})
++
++    assert len(fake.calls) == 1
++    assert fake.calls[0][0] == DECISION
++    assert fake.calls[0][1] == {"message": "checkout fails"}
++    assert fake.calls[0][2] == CONFIG
++    assert isinstance(report.result.answers["intent"], ChoiceResult)
++    assert isinstance(report.result.answers["complexity"], ScoreResult)
++    assert isinstance(report.result.answers["has-repro"], NoulResult)
++    assert report.result.request_id == "request-1"
++    assert report.outcome.route == "engineering_escalation"
++
++
++def test_low_intent_confidence_routes_to_human() -> None:
++    report = run_triage(FakeJev(bundle(intent_confidence=0.49)), state={})
++
++    assert report.outcome.route == "human_review"
++    assert "intent" in report.outcome.reason
++
++
++def test_order_status_uses_deterministic_handler_and_ignores_irrelevant_answers() -> None:
++    report = run_triage(
++        FakeJev(
++            bundle(
++                intent="order_status",
++                severity=0.0,
++                severity_confidence=0.10,
++                repro=1.0,
++                refund=1.0,
++            )
++        ),
++        state={"message": "where is my order"},
++    )
++
++    assert report.outcome.route == "order_lookup"
++
++
++def test_bug_route_requires_severity_confidence_and_reproducibility() -> None:
++    uncertain = run_triage(FakeJev(bundle(severity_confidence=0.49)), state={})
++    not_reproducible = run_triage(FakeJev(bundle(repro=0.60)), state={})
++
++    assert uncertain.outcome.route == "human_review"
++    assert not_reproducible.outcome.route == "bug_backlog"
++
++
++def test_billing_route_uses_refund_probability() -> None:
++    refund = run_triage(FakeJev(bundle(intent="billing", refund=0.71)), state={})
++    ordinary = run_triage(FakeJev(bundle(intent="billing", refund=0.70)), state={})
++
++    assert refund.outcome.route == "billing_refund_review"
++    assert ordinary.outcome.route == "billing_support"
++
++
++def test_frustration_sets_cross_cutting_priority_flag() -> None:
++    report = run_triage(FakeJev(bundle(intent="feature_request", frustration=1.51)), state={})
++
++    assert report.outcome.route == "feature_intake"
++    assert report.outcome.priority is True
++
++
++def test_composite_score_normalizes_and_weights_atomic_scores() -> None:
++    scores = {"complexity": score(1.0, 0.8), "bug-severity": score(2.0, 0.8)}
++
++    assert composite_score(scores, {"complexity": 0.25, "bug-severity": 0.75}) == 0.875
++
++
++def test_changing_weights_does_not_change_jev_request() -> None:
++    state = {"message": "same request"}
++    first_fake = FakeJev(bundle())
++    second_fake = FakeJev(bundle())
++
++    first = run_triage(first_fake, state=state, weights={"complexity": 0.2, "bug-severity": 0.6, "frustration": 0.2})
++    second = run_triage(second_fake, state=state, weights={"complexity": 0.6, "bug-severity": 0.2, "frustration": 0.2})
++
++    assert first_fake.calls[0][:3] == second_fake.calls[0][:3]
++    assert first.attention_score != second.attention_score

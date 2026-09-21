@@ -101,16 +101,12 @@ class AnswerStage(PipeStage[BundleResult, PrimitiveResult]):
 
     def apply(self, value: BundleResult) -> PrimitiveResult:
         if not isinstance(value, BundleResult):
-            raise PipelineTypeError(
-                f"answer({self.name!r}) expected BundleResult, got {type(value).__name__}"
-            )
+            raise PipelineTypeError(f"answer({self.name!r}) expected BundleResult, got {type(value).__name__}")
         try:
             return value.answers[self.name]
         except KeyError as error:
             available = ", ".join(sorted(value.answers)) or "<none>"
-            raise PipelineLookupError(
-                f"unknown bundle answer {self.name!r}; available answers: {available}"
-            ) from error
+            raise PipelineLookupError(f"unknown bundle answer {self.name!r}; available answers: {available}") from error
 
 
 @dataclass(frozen=True, slots=True)
@@ -122,8 +118,7 @@ class ConfidenceGateStage(PipeStage[ChoiceResult | ScoreResult, GateOutcome]):
     def apply(self, value: ChoiceResult | ScoreResult) -> GateOutcome:
         if not isinstance(value, (ChoiceResult, ScoreResult)):
             raise PipelineTypeError(
-                "require_confidence expected ChoiceResult or ScoreResult, "
-                f"got {type(value).__name__}"
+                f"require_confidence expected ChoiceResult or ScoreResult, got {type(value).__name__}"
             )
         gate = GateEvidence(
             signal="confidence",
@@ -145,21 +140,14 @@ class ProbabilityGateStage(PipeStage[NoulResult, GateOutcome]):
 
     def apply(self, value: NoulResult) -> GateOutcome:
         if not isinstance(value, NoulResult):
-            raise PipelineTypeError(
-                "require_probability expected NoulResult, "
-                f"got {type(value).__name__}"
-            )
+            raise PipelineTypeError(f"require_probability expected NoulResult, got {type(value).__name__}")
         gate = GateEvidence(
             signal="probability",
             observed=value.value,
             comparator=self.comparator,
             threshold=self.threshold,
         )
-        passed = (
-            value.value >= self.threshold
-            if self.comparator == "at_least"
-            else value.value <= self.threshold
-        )
+        passed = value.value >= self.threshold if self.comparator == "at_least" else value.value <= self.threshold
         if passed:
             return Accepted(value=value.value, result=value, gate=gate)
         return Rejected(result=value, gate=gate)
@@ -185,9 +173,7 @@ def require_confidence(minimum: float) -> ConfidenceGateStage:
     return ConfidenceGateStage(minimum=_validate_threshold(minimum, "confidence threshold"))
 
 
-def require_probability(
-    *, at_least: float | None = None, at_most: float | None = None
-) -> ProbabilityGateStage:
+def require_probability(*, at_least: float | None = None, at_most: float | None = None) -> ProbabilityGateStage:
     """Create an inclusive lower or upper probability gate for Noul results."""
     if (at_least is None) == (at_most is None):
         raise ValueError("require_probability requires exactly one of at_least or at_most")

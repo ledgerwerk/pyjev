@@ -26,7 +26,6 @@ accidentally consumed by a pipeline. Use the exit code to route to human review.
 
 ## Thresholds belong to the application
 
-
 The Python equivalent is a value-level policy outcome rather than a process exit:
 
 ```python

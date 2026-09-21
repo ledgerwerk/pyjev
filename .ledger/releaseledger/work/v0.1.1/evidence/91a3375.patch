@@ -1,0 +1,1330 @@
+ README.md               | 145 ++++++++++++++++++++++++++++++++++++++++--------
+ docs/agent-skill.md     |  20 +++++++
+ docs/authentication.md  |  71 ++++++++++++++++++++----
+ docs/cli.md             |   4 ++
+ docs/comparisons.md     | 114 +++++++++++++++++++++++++++++++++----
+ docs/confidence.md      |   4 ++
+ docs/getting-started.md | 112 +++++++++++++++++++++++--------------
+ docs/index.md           |  89 ++++++++++++++++++-----------
+ docs/named-decisions.md |  30 ++++++++++
+ docs/python-api.md      |   6 ++
+ pyjev/cli.py            |  70 ++++++++++++++++++++++-
+ pyjev/client.py         |   7 +++
+ pyjev/compile.py        |  29 +++++++++-
+ pyjev/decisions.py      |  16 ++++++
+ pyproject.toml          |   3 +-
+ skills/pyjev/SKILL.md   |  72 ++++++++++++++++++++++++
+ tests/test_cli.py       | 106 +++++++++++++++++++++++++++++++++++
+ tests/test_client.py    |  13 +++++
+ tests/test_compile.py   |  31 +++++++++++
+ tests/test_docs.py      |  14 +++++
+ 20 files changed, 832 insertions(+), 124 deletions(-)
+
+diff --git a/README.md b/README.md
+index fdc74a5..37bcc2a 100644
+--- a/README.md
++++ b/README.md
+@@ -5,27 +5,82 @@
+
+ # pyjev
+
+-**Confidence-aware Jev decisions for Python, shell, CI, and automation.**
++**Reusable, inspectable Jev decision contracts for Python applications and automation.**
+
+-`pyjev` is a thin operational layer over TypeSafe's official `typesafe-sdk`. It
+-preserves Jev probabilities, confidence, and response metadata while adding
+-reusable named decisions, shell-safe output, credential ergonomics, local
+-validation, request inspection, and confidence gates.
++`pyjev` is a Python-first operational layer over TypeSafe's official
++`typesafe-sdk`. It gives applications typed sync and native async APIs, reusable
++version-controlled `.pyjev.toml` decisions, offline validation and request
++compilation, preserved uncertainty, credential ergonomics, and explicit
++confidence-gated automation.
+
+-## Install
++## Why pyjev?
++
++- **Python integration:** dependency injection, caller-owned SDK clients, lifecycle semantics, and typed result wrappers.
++- **Decision contracts:** declare named Noul, Choice, Score, and bundle decisions once in `.pyjev.toml`, then reuse them from Python and shell.
++- **Offline inspection:** validate and compile a decision without credentials, client construction, or network access.
++- **Uncertainty preserved:** probabilities, confidence, usage, request IDs, and raw answer metadata remain available to callers.
++- **Application policy:** confidence gates make the caller's automation threshold explicit and shell-safe.
++- **Official transport boundary:** TypeSafe's SDK owns API models, transport, retries, authentication, and API semantics; pyjev adds application-level structure.
++
++The `pyjev` command is an interface to these library and decision-contract
++capabilities. It is useful in shell and CI, but direct primitive commands are
++not the whole product.
++
++## A 60-second named decision
++
++Create a version-controlled `.pyjev.toml`:
++
++```toml
++[pyjev]
++schema = 1
++
++[decision.ticket-route]
++type = "choice"
++question = "Which team should handle this support request?"
++
++[decision.ticket-route.options]
++billing = "Billing, invoice, payment, or refund issue"
++engineering = "Technical problem or product bug"
++sales = "Purchasing, pricing, or procurement question"
++```
++
++Inspect it before using credentials or the network:
+
+ ```bash
+-pip install pyjev
+-# or: uv tool install pyjev
++pyjev decision validate
++pyjev decision compile ticket-route --state "Stripe checkout fails"
+ ```
+
+-For a development checkout:
++Execute the same named contract from shell:
+
+ ```bash
+-pip install -e '.[dev,docs]'
++echo 'Stripe checkout fails' | pyjev decide ticket-route --json
++```
++
++Or from Python:
++
++```python
++from pyjev import Jev
++
++with Jev() as jev:
++    result = jev.decide("ticket-route", state="Stripe checkout fails")
++
++print(result.value, result.confidence, result.probabilities)
++```
++
++For async applications, use the native SDK-backed API:
++
++```python
++from pyjev import AsyncJev
++
++async with AsyncJev() as jev:
++    result = await jev.decide("ticket-route", state="Stripe checkout fails")
+ ```
+
+-## A first decision
++## Direct dynamic decisions
++
++When criteria are inherently runtime-dependent, use the typed Python API or the
++CLI directly:
+
+ ```bash
+ pyjev choice "Where should this ticket go?" \
+@@ -45,28 +100,74 @@ with Jev() as jev:
+         state="Stripe checkout fails",
+         choices={"billing": "Payments", "engineering": "Technical", "sales": "Purchasing"},
+     )
++
+ print(result.value, result.confidence, result.probabilities)
+ ```
+
+-## What pyjev adds
++## Confidence-aware automation
++
++Choice and Score can require an application-selected threshold:
++
++```bash
++pyjev choice "Route this ticket" \
++  --option billing --option engineering --option sales \
++  --min-confidence 0.85 --value
++```
++
++A valid result below the threshold exits with pyjev's code `3` and emits no
++actionable `--value` stdout. Confidence is a Jev signal; the threshold is the
++caller's policy, not a universal correctness probability.
++
++## Authentication
++
++Use the hidden interactive prompt for local setup or `TYPESAFE_API_KEY` in CI:
++
++```bash
++pyjev auth set
++pyjev auth test
++export TYPESAFE_API_KEY='...'
++```
++
++`pyjev auth test` performs one minimal official-SDK request and reports safe
++credential-source and model metadata. Do not put secrets in `.pyjev.toml`.
++The explicit `auth set --api-key` option remains available for compatibility but
++is unsafe because shell history and process inspection may expose it.
+
+-- direct Noul, Choice, and Score operations with uncertainty preserved;
+-- reusable `.pyjev.toml` decisions and mixed-question bundles;
+-- offline validation and request compilation;
+-- confidence-gated shell automation and stable exit codes;
+-- keyring, environment, and explicit plaintext-file credential support;
+-- request IDs, usage, raw metadata, and structured JSON for debugging.
++## pyjev, the official SDK, and jev-cli
+
+-The official `typesafe-sdk` remains responsible for transport, retries, API
+-models, authentication at the HTTP layer, and API error semantics. pyjev does
+-not invent probabilities or confidence calculations.
++- Use `typesafe-sdk` directly for low-level TypeSafe control.
++- Use `pyjev` for Python application integration, named decision contracts,
++  offline tooling, typed uncertainty, and confidence-aware policy.
++- Use a standalone provider-aware CLI/MCP tool such as `jev-cli` for its direct
++  shell, provider, MCP, and agent-skill workflows.
++
++These tools overlap on primitive shell operations but optimize for different
++layers. See [the comparison](docs/comparisons.md) for the dated feature matrix.
++
++## Install
++
++```bash
++pip install pyjev
++# or
++uv tool install pyjev
++```
++
++For a development checkout:
++
++```bash
++pip install -e '.[dev,docs]'
++```
+
+ ## Learn more
+
+ - [Full documentation](docs/index.md)
++- [Getting started](docs/getting-started.md)
++- [Named decisions](docs/named-decisions.md)
++- [Python API](docs/python-api.md)
++- [CLI and exit codes](docs/cli.md)
++- [Agent skill](docs/agent-skill.md)
+ - [Runnable examples](examples/README.md)
+ - [TypeSafe Jev documentation](https://docs.typesafe.ai/)
+-- [Issues](https://github.com/ledgerwerk/pyjev/issues)
+
+ ## License
+
+diff --git a/docs/agent-skill.md b/docs/agent-skill.md
+new file mode 100644
+index 0000000..dc46fa1
+--- /dev/null
++++ b/docs/agent-skill.md
+@@ -0,0 +1,20 @@
++# Agent skill
++
++The bundled pyjev skill at `skills/pyjev/SKILL.md` teaches an agent to use
++named decision contracts without reading pyjev source or adding an MCP
++integration.
++
++Its workflow is deliberately inspect-first:
++
++1. list and show named decisions;
++2. validate the complete `.pyjev.toml` locally;
++3. compile the exact request without credentials;
++4. inspect the schema marker and specification fingerprint;
++5. execute only after offline checks succeed;
++6. preserve uncertainty and metadata unless a scalar is explicitly safe;
++7. apply confidence thresholds as caller policy;
++8. keep deterministic constraints in normal application code.
++
++The skill also documents credential-safe setup, `auth test`, and pyjev's
++project-specific exit codes. It does not expose a generic primitive MCP server;
++a future agent adapter should expose named-decision and offline tooling instead.
+diff --git a/docs/authentication.md b/docs/authentication.md
+index aecf01c..4e1f98c 100644
+--- a/docs/authentication.md
++++ b/docs/authentication.md
+@@ -1,30 +1,79 @@
+ # Authentication
+
+-Credential lookup order is:
++Credential lookup order for Python clients is:
+
+ 1. explicit Python `api_key=`;
+ 2. `TYPESAFE_API_KEY`;
+ 3. the OS keyring;
+ 4. a user-level plaintext fallback file.
+
++Decision validation and compilation do not read credentials or contact the Jev
++API.
++
+ ## CLI management
+
++For interactive local setup, omit the key argument so input stays hidden:
++
+ ```bash
+ pyjev auth set
+-pyjev auth set --storage keyring
+-pyjev auth set --storage file
+ pyjev auth status
+-pyjev auth delete
++pyjev auth test
++```
++
++`auth test` performs exactly one minimal request through the official SDK. It
++reports only the credential source and returned model:
++
++```text
++credential: keyring
++status: valid
++model: jev-latest
++```
++
++Use `--json` for automation:
++
++```bash
++pyjev auth test --json
++```
++
++```json
++{ "credential_source": "keyring", "model": "jev-latest", "ok": true }
+ ```
+
+-Interactive entry hides the key. `--api-key SECRET` can leak into shell history, so use
+-it only when that tradeoff is acceptable. Deleting persisted credentials does not unset
+-an active `TYPESAFE_API_KEY` environment variable.
++Missing credentials, authentication rejection, network failures, and API
++failures use runtime exit code `1` and safe status messages. The command never
++persists a credential and never prints the key.
++
++The explicit `--api-key` option remains available for compatibility:
++
++```bash
++pyjev auth set --api-key '...'
++```
++
++It is **unsafe** because shell history, process listings, or CI command logs may
++expose the value. Prefer the hidden prompt for interactive use and
++`TYPESAFE_API_KEY` for non-interactive use. If a secret must be supplied by a
++pipeline, keep it in the environment or protected stdin rather than command
++arguments.
++
++```bash
++export TYPESAFE_API_KEY='...'
++pyjev auth test --json
++```
++
++`pyjev auth delete` removes pyjev-managed persisted credentials but does not
++unset an active `TYPESAFE_API_KEY` environment variable.
+
+ :::{warning}
+-`--storage file` stores the key as plaintext in the user's configuration directory.
+-Restrictive permissions are helpful but do not make the key encrypted.
++`--storage file` stores the key as plaintext in the user's configuration
++directory. Restrictive permissions are helpful but do not make the key
++encrypted.
+ :::
+
+-Project `.pyjev.toml` files must never contain API keys. Decision compilation and docs
+-builds do not read credentials or contact the Jev API.
++## Credential sources
++
++`auth status` identifies the effective source as `environment`, `keyring`, or
++`file`. It reports `missing` as an error. Errors, JSON output, and diagnostic
++messages must not include the key contents.
++
++Project `.pyjev.toml` files must never contain API keys. Keep credentials out of
++source control, compiled decision previews, documentation builds, and logs.
+diff --git a/docs/cli.md b/docs/cli.md
+index efb709c..d492e1a 100644
+--- a/docs/cli.md
++++ b/docs/cli.md
+@@ -54,6 +54,10 @@ Keep these codes stable in scripts.
+
+ ## Shell composition
+
++These are pyjev-specific automation codes. They are not interchangeable with
++another `jev` CLI's exit-code taxonomy; in particular, pyjev code `3` means a
++valid Choice/Score result failed the caller's confidence gate.
++
+ ```bash
+ if TEAM="$(cat ticket.txt | pyjev choice "Route this ticket" \
+   --option billing --option engineering --option sales \
+diff --git a/docs/comparisons.md b/docs/comparisons.md
+index 7c50427..c2b01f3 100644
+--- a/docs/comparisons.md
++++ b/docs/comparisons.md
+@@ -2,18 +2,108 @@
+
+ ## Three layers
+
+-- `typesafe-sdk`: the official low-level Python SDK for TypeSafe models, transport,
+-  retries, and API errors.
+-- `pyjev`: an operational wrapper with result preservation, named `.pyjev.toml`
+-  decisions, CLI behavior, credentials, validation, compilation, and confidence gates.
+-- Other higher-level interfaces: may optimize for application-model or Pydantic ergonomics.
++- `typesafe-sdk`: the official low-level Python SDK for TypeSafe models,
++  transport, retries, and API errors.
++- `pyjev`: a Python application layer with typed results, named `.pyjev.toml`
++  decisions, offline compilation, credentials, CLI behavior, and confidence
++  gates.
++- Other higher-level tools: may optimize for a different application, provider,
++  agent, or protocol workflow.
+
+-## Why not use the SDK directly?
++## pyjev and `jev-cli`
++
++This comparison uses `tumf/jev-cli` version **0.6.2**, main commit
++`980cb98f5f529ba310ce4c7481a55e034b0a0829`, reviewed on **2026-09-20**. It is a
++version-qualified snapshot, not a claim about every future release.
++
++Both projects are useful and overlap on direct Jev primitives. They optimize for
++different layers rather than being interchangeable implementations of one
++product.
++
++| Use case or capability             | pyjev                                                              | `jev-cli` 0.6.2                                                                              |
++| ---------------------------------- | ------------------------------------------------------------------ | -------------------------------------------------------------------------------------------- |
++| Embed Jev in a Python application  | First-class `Jev` API                                              | Primarily a CLI/MCP tool                                                                     |
++| Native async Python integration    | `AsyncJev` uses the SDK async client                               | Not its primary API                                                                          |
++| Transport boundary                 | Delegates to the official `typesafe-sdk`                           | Direct provider-aware HTTP/request translation                                               |
++| Typed application results          | `NoulResult`, `ChoiceResult`, `ScoreResult`, `BundleResult`        | JSON close to the provider/remote contract                                                   |
++| Version-controlled named decisions | `.pyjev.toml` with schema and discovery                            | No equivalent named-decision declaration layer                                               |
++| Named mixed-question bundles       | Yes                                                                | Raw request capability, without the same declaration layer                                   |
++| Offline validation and compilation | Yes; no credential or network required                             | No equivalent named-decision compiler                                                        |
++| Confidence-gated automation        | Yes; failed `--value` gates emit no actionable stdout              | No equivalent confidence-policy gate                                                         |
++| Credential storage                 | Environment, OS keyring, or explicit plaintext fallback            | Environment or XDG JSON credential store                                                     |
++| Generic one-off shell primitives   | `noul`, `choice`, `score`, `run`                                   | `noul`, `choice`, `score`, `run`                                                             |
++| State and machine output           | stdin, file, JSON state, `--json`, `--value`                       | stdin, `@file`, JSON state, JSON-first output                                                |
++| Providers                          | Official SDK semantics                                             | Official, Vercel AI Gateway, OpenRouter, and custom Jev-compatible endpoint in this baseline |
++| MCP host integration               | Not currently                                                      | `jev-mcp` stdio server                                                                       |
++| Agent installation workflow        | Not currently                                                      | Bundled `jev install-skills` skill installer                                                 |
++| Online credential check            | `auth status` reports local source; `auth test` checks the service | `auth test`                                                                                  |
++
++`jev-cli` retains rich response data where the provider supplies it. pyjev's
++result wrappers are a stable Python-facing contract; the distinction is not
++that `jev-cli` discards uncertainty.
++
++## Architecture
++
++A pyjev named decision flows through a validated repository declaration:
++
++```text
++.pyjev.toml -> schema/discovery -> offline compile -> Jev/AsyncJev -> typesafe-sdk
++```
++
++The official SDK owns transport, retries, request models, and API error
++semantics. pyjev adds declaration, validation, result normalization, lifecycle,
++credentials, and caller policy.
++
++The `jev-cli` baseline is closer to:
++
++```text
++CLI or MCP tool -> provider selection/translation -> HTTP endpoint -> JSON result
++```
++
++That makes it a strong direct shell, agent, MCP, and multi-provider client. It
++also means it owns provider request translation and compatibility behavior.
+
+-Use `typesafe-sdk` directly when you want maximum control and do not need named decisions,
+-pyjev credential ergonomics, the shell CLI, confidence-gate exit semantics, or pyjev result
+-wrappers. Use pyjev when those operational features make decisions easier to declare,
+-inspect, validate, execute, gate, trace, and reuse.
++## When to use which
++
++Use **pyjev** when you need:
++
++- an embeddable sync or async Python client;
++- dependency injection and caller-owned client lifecycle;
++- typed results with uncertainty and metadata preserved;
++- named decisions reviewed in source control;
++- credential-free validation or request previews;
++- explicit confidence policy at an automation boundary.
++
++Use **`jev-cli`** when you need:
++
++- a standalone generic shell client;
++- provider selection across the official service, gateways, or a custom endpoint;
++- an MCP server for an agent host;
++- its bundled agent-skill installation workflow;
++- JSON-first direct request tooling.
++
++For a one-off primitive shell judgment, either tool may fit. The syntax and
++output overlap there and should not be treated as the strategic distinction.
++
++## Exit codes are not interchangeable
++
++pyjev's exit codes are its own automation contract:
++
++| Exit | pyjev meaning                                                      |
++| ---: | ------------------------------------------------------------------ |
++|    0 | Successful result and any gate passed                              |
++|    1 | Runtime, credential, API, network, or I/O failure                  |
++|    2 | Usage or local validation error                                    |
++|    3 | Valid Choice/Score result, but the caller's confidence gate failed |
++
++In particular, pyjev exit code `3` means a policy gate failed after Jev returned a
++valid result. It does **not** mean the API rejected authentication. Do not use
++these numbers as if they were interoperable with another `jev` CLI's taxonomy.
++
++## Why not use the SDK directly?
+
+-pyjev is not a decorator framework, does not require Pydantic, and does not replace the
+-official SDK's transport or probabilistic semantics.
++Use `typesafe-sdk` directly when you want maximum control and do not need named
++decisions, pyjev credential ergonomics, shell-safe confidence gates, offline
++inspection, or pyjev result wrappers. Use pyjev when those application and
++workflow abstractions make decisions easier to declare, inspect, validate,
++execute, gate, trace, and reuse.
+diff --git a/docs/confidence.md b/docs/confidence.md
+index 82bd2a9..a8e11c2 100644
+--- a/docs/confidence.md
++++ b/docs/confidence.md
+@@ -33,3 +33,7 @@ this pass, and it does not invent a default threshold.
+
+ Noul returns a probability of true and does not expose the Choice/Score confidence gate.
+ Choose and document an application policy explicitly when using Noul.
++
++The numeric exit codes are part of pyjev's CLI contract, not a Jev or cross-tool
++standard. Do not assume they match `jev-cli`; a pyjev exit `3` specifically means
++the returned Choice/Score result did not satisfy the caller's threshold.
+diff --git a/docs/getting-started.md b/docs/getting-started.md
+index 1d337fc..a2e62c3 100644
+--- a/docs/getting-started.md
++++ b/docs/getting-started.md
+@@ -1,6 +1,7 @@
+ # Getting started
+
+-This page takes a new user from installation to a first decision in about five minutes.
++This walkthrough introduces pyjev's main idea: define a reusable decision
++contract, inspect it offline, then use the same contract from shell and Python.
+
+ ## Install
+
+@@ -15,78 +16,107 @@ For a checkout, install contributor and documentation dependencies separately:
+ pip install -e '.[dev,docs]'
+ ```
+
++## Create a decision contract
++
++In a project directory, create `.pyjev.toml`:
++
++```toml
++[pyjev]
++schema = 1
++
++[decision.ticket-route]
++type = "choice"
++question = "Which team should handle this support request?"
++
++[decision.ticket-route.options]
++billing = "Billing, invoice, payment, or refund issue"
++engineering = "Technical problem or product bug"
++sales = "Purchasing, pricing, or procurement question"
++```
++
++This is a version-controlled specification. It is not a secret store and must
++not contain API keys.
++
++## Inspect before execution
++
++Validation and compilation are local operations:
++
++```bash
++pyjev decision validate
++pyjev decision show ticket-route
++pyjev decision compile ticket-route --state "Stripe webhooks fail"
++```
++
++They do not read credentials, construct a client, or contact the Jev API. The
++compiled output is a normalized request preview with a stable schema marker and
++non-secret decision fingerprint.
++
+ ## Authenticate
+
+-For an interactive local setup:
++For an interactive local setup, use hidden input:
+
+ ```bash
+ pyjev auth set
+ pyjev auth status
++pyjev auth test
+ ```
+
+-For CI, use an environment variable:
++For CI, prefer the environment:
+
+ ```bash
+ export TYPESAFE_API_KEY='...'
++pyjev auth test --json
+ ```
+
++`auth test` performs one minimal request through the official SDK and reports
++safe metadata only. The explicit `auth set --api-key` option is retained for
++compatibility but is unsafe because shell history and process listings may
++expose the value. Do not put secrets in command output, decision files, or
++logs.
++
+ :::{warning}
+-The file fallback is plaintext. Restrictive permissions reduce exposure but do not
+-encrypt the credential.
++The file fallback is plaintext. Restrictive permissions reduce exposure but do
++not encrypt the credential.
+ :::
+
+-## First CLI decision
+-
+-Choice returns a selected label, confidence, and the complete distribution:
++## Execute from shell
+
+ ```bash
+-pyjev choice "Where should this ticket go?" \
+-  --state "Stripe checkout fails" \
+-  --option billing="Payments and refunds" \
+-  --option engineering="Technical failures" \
+-  --option sales="Purchasing questions" \
+-  --json
++echo "Stripe webhooks fail" | pyjev decide ticket-route --json
+ ```
+
+-`--json` is intended for programs and preserves all result metadata.
++`--json` preserves result metadata. Use `--value` only when a scalar is safe to
++consume, and use `--min-confidence` when the application requires a confidence
++policy.
+
+-## First Python decision
++## Execute from Python
+
+ ```python
+ from pyjev import Jev
+
+ with Jev() as jev:
+-    result = jev.choice(
+-        "Where should this ticket go?",
+-        state="Stripe checkout fails",
+-        choices={"billing": "Payments", "engineering": "Technical", "sales": "Purchasing"},
+-    )
+-print(result.value, result.confidence, result.probabilities)
+-```
+-
+-## First named decision
++    result = jev.decide("ticket-route", state="Stripe webhooks fail")
+
+-Create `.pyjev.toml`:
++print(result.value)
++print(result.confidence)
++print(result.probabilities)
++```
+
+-```toml
+-[pyjev]
+-schema = 1
++For native asynchronous applications:
+
+-[decision.ticket-route]
+-type = "choice"
+-question = "Which team should handle this support request?"
++```python
++from pyjev import AsyncJev
+
+-[decision.ticket-route.options]
+-billing = "Billing, invoice, payment, or refund issue"
+-engineering = "Technical problem or product bug"
+-sales = "Purchasing, pricing, or procurement question"
++async with AsyncJev() as jev:
++    result = await jev.decide("ticket-route", state="Stripe webhooks fail")
+ ```
+
+-Then run it from the project directory:
++## When to use a direct primitive
+
+-```bash
+-echo "Stripe webhooks fail" | pyjev decide ticket-route --json
+-```
++Use `jev.choice(...)`, `jev.noul(...)`, or `jev.score(...)` when criteria are
++computed dynamically from deterministic application state. Keep deterministic
++constraints in normal Python; use a named decision when the judgment contract
++is stable and worth reviewing in source control.
+
+ Continue with [Named decisions](named-decisions.md), [Confidence](confidence.md),
+-[Python API](python-api.md), and [CLI](cli.md).
++[Authentication](authentication.md), and [Python API](python-api.md).
+diff --git a/docs/index.md b/docs/index.md
+index 5c08591..4912917 100644
+--- a/docs/index.md
++++ b/docs/index.md
+@@ -1,52 +1,66 @@
+ # pyjev
+
+-**Confidence-aware Jev decisions for Python, shell, CI, and automation.**
++**Reusable, inspectable Jev decision contracts for Python applications and automation.**
+
+-pyjev is a thin operational layer over TypeSafe's official `typesafe-sdk`. It
+-preserves Jev probabilities, confidence, and response metadata while adding
+-reusable named decisions, shell-safe output, local validation, request
+-inspection, and credential ergonomics.
++`pyjev` is the Python application layer above TypeSafe's official
++`typesafe-sdk`. It adds typed synchronous and native asynchronous clients,
++version-controlled `.pyjev.toml` decision contracts, offline validation and
++compilation, uncertainty-preserving results, credential ergonomics, and
++confidence-aware application policy.
+
+-## CLI
++## Why pyjev?
++
++- Embed Jev in Python applications with dependency injection and typed results.
++- Declare stable named decisions and bundles once, then reuse them from Python,
++  shell, CI, or an agent workflow.
++- Inspect and compile requests without credentials, client construction, or
++  network access.
++- Preserve probabilities, confidence, usage, request IDs, and raw metadata.
++- Gate automation explicitly without consuming a low-confidence value by mistake.
++- Let the official SDK own transport, retries, API models, authentication, and
++  API error semantics.
++
++## 60-second workflow
+
+ ```bash
+-pyjev choice "Where should this ticket go?" \
+-  --state "Stripe checkout fails" \
+-  --option billing="Payments and refunds" \
+-  --option engineering="Technical failures" \
+-  --option sales="Purchasing questions"
++cat > .pyjev.toml <<'EOF'
++[pyjev]
++schema = 1
++
++[decision.ticket-route]
++type = "choice"
++question = "Which team should handle this support request?"
++
++[decision.ticket-route.options]
++billing = "Billing or refunds"
++engineering = "Technical problem or product bug"
++sales = "Purchasing or procurement"
++EOF
++
++pyjev decision validate
++pyjev decision compile ticket-route --state "Stripe checkout fails"
++echo "Stripe checkout fails" | pyjev decide ticket-route --json
+ ```
+
+-## Python
++The same contract is available to Python callers:
+
+ ```python
+ from pyjev import Jev
+
+ with Jev() as jev:
+-    result = jev.choice(
+-        "Where should this ticket go?",
+-        state="Stripe checkout fails",
+-        choices={"billing": "Payments", "engineering": "Technical", "sales": "Purchasing"},
+-    )
+-
+-print(result.value)
+-print(result.confidence)
+-print(result.probabilities)
++    result = jev.decide("ticket-route", state="Stripe checkout fails")
++
++print(result.value, result.confidence, result.probabilities)
+ ```
+
+-## Why pyjev?
++## Direct dynamic decisions
+
+-- Preserve probabilities, confidence, and response metadata.
+-- Define reusable decisions in `.pyjev.toml`.
+-- Use the same decision from Python or the shell.
+-- Gate automation explicitly at the invocation boundary.
+-- Validate mistakes before spending an API request.
+-- Retain request IDs and usage metadata for debugging.
++For criteria that depend on runtime deterministic logic, use `Jev`/`AsyncJev`
++or the direct `pyjev choice`, `pyjev noul`, and `pyjev score` commands. The CLI
++is a useful shell and CI interface to pyjev's application layer, not its only
++abstraction.
+
+-Start with [Getting started](getting-started.md), then read [Concepts](concepts.md).
+-See [Confidence](confidence.md) for safe automation, [Named decisions](named-decisions.md)
+-for reusable specifications, [CLI](cli.md) for shell usage, and [Python API](python-api.md)
+-for code usage.
++## Documentation
+
+ ```{toctree}
+ :maxdepth: 2
+@@ -59,6 +73,7 @@ cli
+ named-decisions
+ confidence
+ authentication
++agent-skill
+ debugging
+ examples
+ comparisons
+@@ -66,3 +81,13 @@ api/index
+ development
+ changelog
+ ```
++
++- [Getting started](getting-started.md)
++- [Named decisions](named-decisions.md)
++- [Python API](python-api.md)
++- [CLI and exit codes](cli.md)
++- [Confidence policy](confidence.md)
++- [Authentication](authentication.md)
++- [Agent skill](agent-skill.md)
++- [pyjev vs jev-cli](comparisons.md)
++- [Runnable examples](examples.md)
+diff --git a/docs/named-decisions.md b/docs/named-decisions.md
+index 689baf6..da7178f 100644
+--- a/docs/named-decisions.md
++++ b/docs/named-decisions.md
+@@ -68,6 +68,36 @@ Bundle results preserve every child result's probabilities and confidence, plus
+ model, usage, raw response, and request ID. Bundles have no aggregate confidence policy;
+ `--value` and `--min-confidence` are rejected.
+
++## Compiled output contract
++
++`decision compile` produces a credential-free JSON preview with this stable top-level shape:
++
++```json
++{
++  "schema": 1,
++  "decision": {
++    "name": "ticket-route",
++    "type": "choice",
++    "config": ".pyjev.toml",
++    "fingerprint": "<sha256>"
++  },
++  "request": { "state": "...", "questions": {}, "model": null }
++}
++```
++
++The `schema` marker is the compiled-output contract version. `decision.name`,
++`decision.type`, `decision.config`, `decision.fingerprint`, and the request fields
++are stable contract fields. The config identifier is relative to the current
++project when possible and otherwise uses the config filename; it is never an
++absolute machine path. Question and answer data retain the official SDK shape.
++
++The SHA-256 `fingerprint` identifies the validated decision specification and
++schema. It includes the decision name, type, criteria, model, and declaration
++content. It excludes runtime `state`, credentials, and environment-specific
++absolute paths, so the same declaration has the same fingerprint in different
++checkouts. Compilation remains local: it does not construct a client, read a
++credential, or contact the API.
++
+ ## Discovery and inspection
+
+ Configuration precedence is explicit `config=`/`--config`, then `PYJEV_CONFIG`, then the
+diff --git a/docs/python-api.md b/docs/python-api.md
+index 4aece6f..419d950 100644
+--- a/docs/python-api.md
++++ b/docs/python-api.md
+@@ -47,6 +47,12 @@ print(compiled.to_dict())
+ Compilation resolves and validates configuration without creating a client or reading
+ credentials. It is useful for review, debugging, and agent tooling.
+
++`CompiledDecision.fingerprint` is a deterministic SHA-256 identifier for the
++validated declaration. It excludes the runtime state passed to
++`compile_decision()` and does not include credentials or absolute config paths.
++The serialized preview includes `schema = 1`, a reproducible config identifier,
++the fingerprint, and the normalized official SDK request shape.
++
+ ## Injected clients
+
+ ```python
+diff --git a/pyjev/cli.py b/pyjev/cli.py
+index 95deadf..ac0809d 100644
+--- a/pyjev/cli.py
++++ b/pyjev/cli.py
+@@ -402,6 +402,74 @@ class CredentialStorage(str, Enum):
+     file = "file"
+
+
++def _auth_test_failure(source: str, exc: Exception, *, json_output: bool) -> None:
++    """Emit a secret-free authentication-test failure and exit."""
++    if isinstance(exc, CredentialError):
++        status = "local_error"
++        message = "Could not resolve the configured credential."
++    elif isinstance(exc, TypeSafeAuthenticationError):
++        status = "rejected"
++        message = "TypeSafe authentication failed."
++    elif isinstance(exc, TypeSafeAPITimeoutError):
++        status = "unavailable"
++        message = "The TypeSafe request timed out."
++    elif isinstance(exc, TypeSafeAPIConnectionError):
++        status = "unavailable"
++        message = "Could not reach TypeSafe."
++    elif isinstance(exc, TypeSafeAPIError):
++        status = "api_error"
++        message = "The TypeSafe API rejected the authentication test."
++    elif isinstance(exc, TypeSafeError):
++        status = "error"
++        message = "The TypeSafe authentication test failed."
++    else:
++        status = "error"
++        message = "The authentication test failed unexpectedly."
++    if json_output:
++        _print_json({"ok": False, "credential_source": source, "status": status, "error": message})
++    else:
++        typer.echo(f"credential: {source}", err=True)
++        typer.echo(f"status: {status}", err=True)
++        typer.echo(f"error: {message}", err=True)
++    raise typer.Exit(code=EXIT_RUNTIME_ERROR) from exc
++
++
++@auth_app.command("test")
++def auth_test(
++    json_output: bool = typer.Option(False, "--json", help="Emit JSON."),
++) -> None:
++    """Verify the active credential with one minimal official-SDK request."""
++    try:
++        source = credential_source()
++    except CredentialError as exc:
++        _auth_test_failure("unknown", exc, json_output=json_output)
++    if source == "missing":
++        _auth_test_failure(
++            source,
++            CredentialError("No TypeSafe API key found."),
++            json_output=json_output,
++        )
++    try:
++        with Jev() as jev:
++            result = jev.auth_test()
++    except (
++        CredentialError,
++        TypeSafeAuthenticationError,
++        TypeSafeAPITimeoutError,
++        TypeSafeAPIConnectionError,
++        TypeSafeAPIError,
++        TypeSafeError,
++    ) as exc:
++        _auth_test_failure(source, exc, json_output=json_output)
++    payload = {"ok": True, "credential_source": source, "model": result.model}
++    if json_output:
++        _print_json(payload)
++    else:
++        typer.echo(f"credential: {source}")
++        typer.echo("status: valid")
++        typer.echo(f"model: {result.model}")
++
++
+ def _file_warning(path: Path) -> None:
+     typer.echo(
+         f"Warning: {path} stores the API key as plaintext readable by your user account.",
+@@ -414,7 +482,7 @@ def auth_set(
+     api_key: str | None = typer.Option(
+         None,
+         "--api-key",
+-        help="API key. Omit to enter it interactively.",
++        help="API key (unsafe: may leak through shell history/process listings). Omit to enter it interactively.",
+     ),
+     storage: CredentialStorage = typer.Option(
+         CredentialStorage.auto,
+diff --git a/pyjev/client.py b/pyjev/client.py
+index 94ce03f..79af734 100644
+--- a/pyjev/client.py
++++ b/pyjev/client.py
+@@ -223,6 +223,13 @@ class Jev:
+         response = self._client.models.list()
+         return [model.model_dump(mode="json") for model in response.models]
+
++    def auth_test(self) -> NoulResult:
++        """Perform one minimal official-SDK request to verify authentication."""
++        return self.noul(
++            "Is this an authentication test?",
++            state="authentication test",
++        )
++
+     def close(self) -> None:
+         """Close only a client created by this instance."""
+         if self._owns_client:
+diff --git a/pyjev/compile.py b/pyjev/compile.py
+index f2ae032..6e7d5fb 100644
+--- a/pyjev/compile.py
++++ b/pyjev/compile.py
+@@ -9,7 +9,15 @@ from typing import Any
+
+ from typesafe_sdk import Choice, Noul, NoulCriteria, Question, Score
+
+-from .decisions import BundleDecision, ChoiceDecision, Decision, NoulDecision, ScoreDecision, load_decision
++from .decisions import (
++    BundleDecision,
++    ChoiceDecision,
++    Decision,
++    NoulDecision,
++    ScoreDecision,
++    decision_spec_fingerprint,
++    load_decision,
++)
+
+
+ def validate_choice_criteria(choices: Mapping[str, Any | None] | Sequence[str]) -> dict[str, Any | None]:
+@@ -73,6 +81,15 @@ def build_decision_questions(decision: Decision) -> dict[str, Question]:
+     return {"answer": build_question(decision)}
+
+
++def _config_identifier(path: Path) -> str:
++    """Return a stable, non-absolute identifier for compiled output."""
++    resolved = path.expanduser().resolve()
++    try:
++        return resolved.relative_to(Path.cwd().resolve()).as_posix()
++    except ValueError:
++        return resolved.name
++
++
+ @dataclass(frozen=True, slots=True)
+ class CompiledDecision:
+     """A credential-free, normalized request preview for a named decision."""
+@@ -83,14 +100,18 @@ class CompiledDecision:
+     questions: dict[str, Question]
+     model: str | None
+     config_path: Path
++    schema: int
++    fingerprint: str
+
+     def to_dict(self) -> dict[str, Any]:
+-        """Return a deterministic JSON-compatible representation without secrets."""
++        """Return the stable, deterministic JSON-compatible preview contract."""
+         return {
++            "schema": self.schema,
+             "decision": {
+                 "name": self.name,
+                 "type": self.kind,
+-                "config": str(self.config_path),
++                "config": _config_identifier(self.config_path),
++                "fingerprint": self.fingerprint,
+             },
+             "request": {
+                 "state": self.state,
+@@ -148,4 +169,6 @@ def compile_decision(
+         questions=build_decision_questions(decision),
+         model=effective_model,
+         config_path=path,
++        schema=1,
++        fingerprint=decision_spec_fingerprint(decision),
+     )
+diff --git a/pyjev/decisions.py b/pyjev/decisions.py
+index badb0cd..a101e6c 100644
+--- a/pyjev/decisions.py
++++ b/pyjev/decisions.py
+@@ -2,6 +2,7 @@
+
+ from __future__ import annotations
+
++import hashlib
+ import json
+ import os
+ from dataclasses import dataclass
+@@ -310,3 +311,18 @@ def decision_to_dict(decision: Decision) -> dict[str, Any]:
+     if decision.model is not None:
+         result["model"] = decision.model
+     return result
++
++
++def decision_spec_fingerprint(decision: Decision, *, schema: int = 1) -> str:
++    """Return a deterministic SHA-256 fingerprint of a decision declaration.
++
++    The fingerprint covers the validated decision specification and schema, but
++    intentionally excludes runtime state, credentials, and configuration paths.
++    """
++    canonical = json.dumps(
++        {"schema": schema, "decision": decision_to_dict(decision)},
++        ensure_ascii=False,
++        sort_keys=True,
++        separators=(",", ":"),
++    )
++    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+diff --git a/pyproject.toml b/pyproject.toml
+index 0dcd7d1..d57611b 100644
+--- a/pyproject.toml
++++ b/pyproject.toml
+@@ -5,8 +5,7 @@ build-backend = "setuptools.build_meta"
+ [project]
+ name = "pyjev"
+ dynamic = ["version"]
+-description = "Reusable, confidence-aware Jev decisions for Python and the shell."
+-readme = "README.md"
++description = "Reusable, inspectable Jev decision contracts for Python applications and automation."
+ requires-python = ">=3.10"
+ license = "Apache-2.0"
+ authors = [{ name = "holgern" }]
+diff --git a/skills/pyjev/SKILL.md b/skills/pyjev/SKILL.md
+new file mode 100644
+index 0000000..8cb3056
+--- /dev/null
++++ b/skills/pyjev/SKILL.md
+@@ -0,0 +1,72 @@
++---
++name: pyjev
++description: Inspect, validate, compile, and safely execute named pyjev decision contracts.
++---
++
++# pyjev agent workflow
++
++Use this skill when a project contains `.pyjev.toml` or asks an agent to use
++pyjev. Prefer the named-decision contract over re-spelling stable criteria in a
++prompt or one-off command.
++
++## Inspect before execution
++
++Run these commands from the project directory:
++
++```bash
++pyjev decision list --json
++pyjev decision show DECISION --json
++pyjev decision validate
++pyjev decision compile DECISION --state '...'
++```
++
++Validation and compilation are offline. They do not need credentials and do not
++contact the Jev API. Inspect the compiled request, schema marker, and
++specification fingerprint before executing a decision.
++
++## Execute deliberately
++
++Execute only after validation and offline compilation succeed:
++
++```bash
++echo '...' | pyjev decide DECISION --json
++```
++
++Use `--config` when the declaration is not found by normal discovery. Preserve
++the full JSON result when uncertainty, probabilities, usage, model, or request
++ID matters. Do not flatten a result to `--value` unless downstream automation
++is safe to consume a scalar.
++
++For Choice and Score, use an explicit application threshold when automation
++needs a confidence policy:
++
++```bash
++pyjev decide DECISION --min-confidence 0.85 --value
++```
++
++A valid result below the threshold exits `3` and emits no actionable value on
++stdout. Treat that as a human-review path, not as an API or authentication
++failure.
++
++## Keep deterministic logic in code
++
++Use normal Python for exact rules, legal-action filtering, permissions, and
++other deterministic constraints. Use a named Jev decision for a stable
++judgment contract. If criteria are dynamic, build them with `Jev` or
++`AsyncJev` after deterministic filtering.
++
++## Credential safety
++
++Do not place keys in `.pyjev.toml`, prompts, skill files, command arguments, or
++logs. Prefer `TYPESAFE_API_KEY` in automation and hidden `pyjev auth set` input
++for local setup. Use `pyjev auth test --json` to verify the active credential;
++it performs one request and returns safe metadata only.
++
++## Failure handling
++
++- Exit `2`: fix usage or local validation before retrying.
++- Exit `1`: inspect safe runtime, credential, API, network, or I/O diagnostics.
++- Exit `3`: route the valid but below-policy result to review.
++
++These are pyjev-specific codes and must not be assumed to match another `jev`
++CLI. Never retry a low-confidence result as if it were a transport error.
+diff --git a/tests/test_cli.py b/tests/test_cli.py
+index d6e8f40..4d2c873 100644
+--- a/tests/test_cli.py
++++ b/tests/test_cli.py
+@@ -1,3 +1,6 @@
++import json
++from types import SimpleNamespace
++
+ from typer.testing import CliRunner
+
+ import pyjev.cli as cli
+@@ -13,6 +16,109 @@ def test_version():
+     assert result.stdout.strip()
+
+
++class FakeAuthJev:
++    def __init__(self, result=None, error=None):
++        self.result = result or SimpleNamespace(model="jev-test")
++        self.error = error
++        self.calls = 0
++
++    def __enter__(self):
++        return self
++
++    def __exit__(self, exc_type, exc_value, traceback):
++        return None
++
++    def auth_test(self):
++        self.calls += 1
++        if self.error is not None:
++            raise self.error
++        return self.result
++
++
++def test_auth_test_human_output(monkeypatch):
++    fake = FakeAuthJev()
++    monkeypatch.setattr(cli, "Jev", lambda: fake)
++    monkeypatch.setattr(cli, "credential_source", lambda: "keyring")
++
++    result = runner.invoke(app, ["auth", "test"])
++
++    assert result.exit_code == 0
++    assert "credential: keyring" in result.stdout
++    assert "status: valid" in result.stdout
++    assert "model: jev-test" in result.stdout
++    assert fake.calls == 1
++
++
++def test_auth_test_json_output(monkeypatch):
++    monkeypatch.setattr(cli, "Jev", lambda: FakeAuthJev())
++    monkeypatch.setattr(cli, "credential_source", lambda: "environment")
++
++    result = runner.invoke(app, ["auth", "test", "--json"])
++
++    assert result.exit_code == 0
++    assert json.loads(result.stdout) == {
++        "credential_source": "environment",
++        "model": "jev-test",
++        "ok": True,
++    }
++
++
++def test_auth_test_missing_credential_does_not_construct_client(monkeypatch):
++    def unexpected_client():
++        raise AssertionError("client must not be constructed")
++
++    monkeypatch.setattr(cli, "Jev", unexpected_client)
++    monkeypatch.setattr(cli, "credential_source", lambda: "missing")
++
++    result = runner.invoke(app, ["auth", "test", "--json"])
++
++    assert result.exit_code == 1
++    assert json.loads(result.stdout) == {
++        "credential_source": "missing",
++        "error": "Could not resolve the configured credential.",
++        "ok": False,
++        "status": "local_error",
++    }
++
++
++def test_auth_test_rejection_never_prints_secret(monkeypatch):
++    secret = "secret-key"
++    error = cli.TypeSafeAuthenticationError(401, {}, None, secret)
++    monkeypatch.setattr(cli, "Jev", lambda: FakeAuthJev(error=error))
++    monkeypatch.setattr(cli, "credential_source", lambda: "environment")
++
++    result = runner.invoke(app, ["auth", "test", "--json"])
++
++    assert result.exit_code == 1
++    assert json.loads(result.stdout) == {
++        "credential_source": "environment",
++        "error": "TypeSafe authentication failed.",
++        "ok": False,
++        "status": "rejected",
++    }
++    assert secret not in result.output
++
++
++def test_auth_test_connection_failure_is_safe(monkeypatch):
++    monkeypatch.setattr(cli, "Jev", lambda: FakeAuthJev(error=cli.TypeSafeAPIConnectionError("offline")))
++    monkeypatch.setattr(cli, "credential_source", lambda: "keyring")
++
++    result = runner.invoke(app, ["auth", "test"])
++
++    assert result.exit_code == 1
++    assert "credential: keyring" in result.output
++    assert "status: unavailable" in result.output
++    assert "Could not reach TypeSafe." in result.output
++    assert "offline" not in result.output
++
++
++def test_auth_set_help_warns_about_api_key_leakage():
++    result = runner.invoke(app, ["auth", "set", "--help"])
++    assert result.exit_code == 0
++    assert "unsafe" in result.output
++    assert "shell history" in result.output
++
++
+ def test_choice_requires_two_options():
+     result = runner.invoke(
+         app,
+diff --git a/tests/test_client.py b/tests/test_client.py
+index b0c6268..80f004f 100644
+--- a/tests/test_client.py
++++ b/tests/test_client.py
+@@ -119,6 +119,19 @@ def test_models():
+     assert jev.models()[0]["name"] == "jev-test"
+
+
++def test_auth_test_uses_one_minimal_sdk_request():
++    client = FakeClient()
++    result = Jev(client=_as_client(client)).auth_test()
++    assert result.value == 0.91
++    assert len(client.calls) == 1
++    state, questions, model = client.calls[0]
++    assert state == "authentication test"
++    assert model is None
++    question = questions["answer"]
++    assert question.type == "noul"
++    assert question.instructions == "Is this an authentication test?"
++
++
+ def test_request_id_is_preserved():
+     result = Jev(client=_as_client(FakeClient())).ask("Question?", state="state")
+     assert result.request_id == "request-123"
+diff --git a/tests/test_compile.py b/tests/test_compile.py
+index 4d08ff8..e4cc8cb 100644
+--- a/tests/test_compile.py
++++ b/tests/test_compile.py
+@@ -52,3 +52,34 @@ def test_compile_command_defaults_to_secret_free_json(tmp_path: Path) -> None:
+     payload = json.loads(result.stdout)
+     assert payload["decision"]["name"] == "route"
+     assert payload["request"]["questions"]["answer"]["type"] == "choice"
++
++
++def test_compiled_contract_has_stable_secret_free_identity(tmp_path: Path):
++    path = config_file(tmp_path)
++    first = compile_decision("route", state="first", config=path)
++    second = compile_decision("route", state={"different": True}, config=path)
++
++    first_payload = first.to_dict()
++    second_payload = second.to_dict()
++    assert first_payload["schema"] == 1
++    assert first_payload["decision"]["config"] == ".pyjev.toml"
++    assert not Path(first_payload["decision"]["config"]).is_absolute()
++    assert len(first.fingerprint) == 64
++    assert first.fingerprint == second.fingerprint
++    assert first_payload["decision"]["fingerprint"] == first.fingerprint
++    assert first_payload["request"]["state"] != second_payload["request"]["state"]
++
++
++def test_fingerprint_ignores_config_path_but_changes_with_specification(tmp_path: Path):
++    (tmp_path / "one").mkdir()
++    (tmp_path / "two").mkdir()
++    first_path = config_file(tmp_path / "one")
++    second_path = config_file(tmp_path / "two")
++    first = compile_decision("route", state="state", config=first_path)
++    second = compile_decision("route", state="state", config=second_path)
++    assert first.fingerprint == second.fingerprint
++
++    changed = second_path.read_text(encoding="utf-8").replace("Route this ticket", "Route this ticket differently")
++    second_path.write_text(changed, encoding="utf-8")
++    changed_decision = compile_decision("route", state="state", config=second_path)
++    assert changed_decision.fingerprint != first.fingerprint
+diff --git a/tests/test_docs.py b/tests/test_docs.py
+index 24b7752..4549fda 100644
+--- a/tests/test_docs.py
++++ b/tests/test_docs.py
+@@ -15,6 +15,7 @@ def test_documentation_tree_and_build_script_are_present() -> None:
+         "named-decisions.md",
+         "confidence.md",
+         "authentication.md",
++        "agent-skill.md",
+         "debugging.md",
+         "examples.md",
+         "comparisons.md",
+@@ -26,3 +27,16 @@ def test_documentation_tree_and_build_script_are_present() -> None:
+     assert "Path(__file__).resolve().parents[1]" in script
+     assert '"-m",\n        "sphinx"' in script
+     assert '"-W"' in script
++
++
++def test_documentation_emphasizes_decision_contracts_and_boundaries() -> None:
++    readme = (ROOT / "README.md").read_text(encoding="utf-8")
++    comparison = (ROOT / "docs" / "comparisons.md").read_text(encoding="utf-8")
++    skill = (ROOT / "skills" / "pyjev" / "SKILL.md").read_text(encoding="utf-8")
++    assert readme.index("decision contracts") < readme.index("Direct dynamic decisions")
++    assert "`typesafe-sdk`" in readme
++    assert "official" in readme
++    assert "version **0.6.2**" in comparison
++    assert "not interchangeable" in comparison
++    assert "pyjev decision compile" in skill
++    assert "confidence" in skill.lower()
