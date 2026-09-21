@@ -9,6 +9,7 @@ Set `TYPESAFE_API_KEY` or run `pyjev auth set`, then run from the repository roo
 python examples/emergency_snack.py
 python examples/haunted_ci.py
 python examples/connect_four.py
+python examples/support_triage.py
 python examples/semantic_linter.py pyjev/client.py
 python examples/semantic_linter.py pyjev --threshold 0.80
 python examples/semantic_linter.py pyjev/client.py --show-all
@@ -40,6 +41,9 @@ free-form text.
   The JSON report preserves every rule probability and request metadata. Use `--fail-on-findings` only when you deliberately want findings at the selected threshold to fail the command.
 
   The selected function source is sent to the configured Jev API. Do not run the example on code you are not permitted to send to that service.
+
+- `support_triage.py` combines intent routing, composite scoring, confidence-gated actions, and speculative fan-out. The `support-triage` bundle asks all six questions in one request, then ordinary Python chooses the handler. Child confidence remains visible, branch-irrelevant answers are ignored, and the printed attention score uses caller-owned normalization and weights.
+  The example is intentionally explainable rather than prescriptive. Thresholds and weights are application policy, and confidence is not a correctness probability.
 
 This split is intentional. Jev is used as a judgment/decision model, not as a
 Connect Four board parser or deterministic rules engine. Giving the model

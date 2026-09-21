@@ -13,6 +13,7 @@ def test_documentation_tree_and_build_script_are_present() -> None:
         "python-api.md",
         "cli.md",
         "named-decisions.md",
+        "patterns.md",
         "confidence.md",
         "authentication.md",
         "agent-skill.md",
@@ -33,6 +34,8 @@ def test_documentation_emphasizes_decision_contracts_and_boundaries() -> None:
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
     comparison = (ROOT / "docs" / "comparisons.md").read_text(encoding="utf-8")
     skill = (ROOT / "skills" / "pyjev" / "SKILL.md").read_text(encoding="utf-8")
+    patterns = (ROOT / "docs" / "patterns.md").read_text(encoding="utf-8")
+    examples = (ROOT / "examples" / "README.md").read_text(encoding="utf-8")
     assert readme.index("decision contracts") < readme.index("Direct dynamic decisions")
     assert "`typesafe-sdk`" in readme
     assert "official" in readme
@@ -40,3 +43,9 @@ def test_documentation_emphasizes_decision_contracts_and_boundaries() -> None:
     assert "not interchangeable" in comparison
     assert "pyjev decision compile" in skill
     assert "confidence" in skill.lower()
+    assert "docs/patterns.md" in readme
+    assert "Intent routing" in patterns
+    assert "Composite scoring" in patterns
+    assert "Confidence-gated routing" in patterns
+    assert "Speculative fan-out" in patterns
+    assert "support_triage.py" in examples

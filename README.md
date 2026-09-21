@@ -22,6 +22,12 @@ confidence-gated automation.
 - **Application policy:** confidence gates make the caller's automation threshold explicit and shell-safe.
 - **Official transport boundary:** TypeSafe's SDK owns API models, transport, retries, authentication, and API semantics; pyjev adds application-level structure.
 
+## Decision patterns
+
+`pyjev` supports intent routing, composite scoring, confidence-gated automation, and speculative fan-out by combining typed Jev questions with explicit Python policy. Named bundles evaluate several independent questions about one state in a single request, and result wrappers preserve each answer's uncertainty so application code can gate, combine, ignore, or route deterministically.
+
+Keep normalization and weights in application code. Gate the result that controls the action. A bundle deliberately has no aggregate confidence because its child judgments can have different uncertainty and consequences. See the [decision patterns guide](docs/patterns.md) and run `python examples/support_triage.py` for a combined example.
+
 The `pyjev` command is an interface to these library and decision-contract
 capabilities. It is useful in shell and CI, but direct primitive commands are
 not the whole product.

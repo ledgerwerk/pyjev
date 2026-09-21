@@ -94,3 +94,53 @@ question = "This function makes a consequential decision using a magic value or 
 [decision.semantic-lint.questions.unexplained-special-case]
 type = "noul"
 question = "This function contains a workaround or special case whose reason is not made clear."
+
+[decision.support-triage]
+type = "bundle"
+model = "jev-latest"
+
+[decision.support-triage.questions.intent]
+type = "choice"
+question = "What is the primary intent of this support request?"
+
+[decision.support-triage.questions.intent.options]
+order_status = "Asking about an existing order"
+billing = "Charge, invoice, refund, or subscription problem"
+bug_report = "Something appears broken or produces errors"
+feature_request = "Request for new functionality"
+account = "Login, permissions, profile, or security issue"
+
+[decision.support-triage.questions.complexity]
+type = "score"
+question = "How complex is this request to resolve?"
+levels = [
+  "Simple lookup or standard procedure",
+  "Requires judgment or a multi-step process",
+  "Unusual edge case or escalation needed",
+]
+
+[decision.support-triage.questions.bug-severity]
+type = "score"
+question = "How severe is the reported technical issue?"
+levels = [
+  "Cosmetic or negligible impact",
+  "Degraded functionality with workaround",
+  "Blocking issue with no workaround",
+]
+
+[decision.support-triage.questions.has-repro]
+type = "noul"
+question = "The request contains concrete steps that can reproduce the technical issue."
+
+[decision.support-triage.questions.refund-requested]
+type = "noul"
+question = "The customer explicitly asks for a refund or credit."
+
+[decision.support-triage.questions.frustration]
+type = "score"
+question = "How frustrated does the customer appear?"
+levels = [
+  "Calm",
+  "Frustrated but civil",
+  "Very angry",
+]

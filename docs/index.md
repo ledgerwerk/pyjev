@@ -71,6 +71,7 @@ concepts
 python-api
 cli
 named-decisions
+patterns
 confidence
 authentication
 agent-skill
@@ -84,6 +85,7 @@ changelog
 
 - [Getting started](getting-started.md)
 - [Named decisions](named-decisions.md)
+- [Decision patterns](patterns.md)
 - [Python API](python-api.md)
 - [CLI and exit codes](cli.md)
 - [Confidence policy](confidence.md)
