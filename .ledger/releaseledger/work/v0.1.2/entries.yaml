@@ -1,0 +1,63 @@
+schema: releaseledger.entry-batch.v1
+operation: create
+schema_version: 1
+object_type: release_entry_batch
+release_version: v0.1.2
+git_base_ref: 3aedf7b81b63955f9fb79b26e5cd38581e13dc5c
+git_base_sha: 3aedf7b81b63955f9fb79b26e5cd38581e13dc5c
+git_head_ref: 5de343d01807d581d4b55db3e15732774c66e91c
+git_head_sha: 5de343d01807d581d4b55db3e15732774c66e91c
+include_merges: nontrivial
+entries:
+  - kind: added
+    summary: Added typed recipes for classification, extraction, search, verification, matching, reranking, routing, and screening
+    status: accepted
+    source_refs:
+      - git:5de343d01807d581d4b55db3e15732774c66e91c
+    paths:
+      - docs/agent-skill.md
+      - docs/patterns.md
+      - docs/recipes.md
+      - pyjev/recipes/__init__.py
+      - pyjev/recipes/classify.py
+      - pyjev/recipes/extract.py
+      - pyjev/recipes/find.py
+      - pyjev/recipes/match.py
+      - pyjev/recipes/rerank.py
+      - pyjev/recipes/route.py
+      - pyjev/recipes/screen.py
+      - pyjev/recipes/verify.py
+      - skills/pyjev/SKILL.md
+    sources:
+      - git:5de343d01807d581d4b55db3e15732774c66e91c
+    prs: []
+    issues: []
+    contributors:
+      - "@holgern"
+  - kind: added
+    summary: Added typed in-memory decision evaluation and bounded, ordered async batch execution
+    status: accepted
+    paths:
+      - docs/python-api.md
+      - pyjev/batch.py
+      - pyjev/client.py
+      - pyjev/compile.py
+    sources:
+      - git:5de343d01807d581d4b55db3e15732774c66e91c
+    prs: []
+    issues: []
+    contributors:
+      - "@holgern"
+  - kind: added
+    summary: Added structured --pluck selection for CLI results without bypassing confidence gates
+    status: accepted
+    paths:
+      - docs/cli.md
+      - pyjev/cli.py
+      - pyjev/output.py
+    sources:
+      - git:5de343d01807d581d4b55db3e15732774c66e91c
+    prs: []
+    issues: []
+    contributors:
+      - "@holgern"

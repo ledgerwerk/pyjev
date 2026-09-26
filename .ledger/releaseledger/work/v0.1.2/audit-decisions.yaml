@@ -1,0 +1,34 @@
+rows:
+  - sha: 5de343d01807d581d4b55db3e15732774c66e91c
+    inspected: true
+    inspected_paths:
+      - docs/agent-skill.md
+      - docs/cli.md
+      - docs/comparisons.md
+      - docs/confidence.md
+      - docs/index.md
+      - docs/patterns.md
+      - docs/python-api.md
+      - docs/recipes.md
+      - pyjev/batch.py
+      - pyjev/cli.py
+      - pyjev/client.py
+      - pyjev/compile.py
+      - pyjev/output.py
+      - pyjev/recipes/__init__.py
+      - pyjev/recipes/classify.py
+      - pyjev/recipes/extract.py
+      - pyjev/recipes/find.py
+      - pyjev/recipes/match.py
+      - pyjev/recipes/rerank.py
+      - pyjev/recipes/route.py
+      - pyjev/recipes/screen.py
+      - pyjev/recipes/verify.py
+      - skills/pyjev/SKILL.md
+    observed_behavior: Added validated in-memory typed decision evaluation in sync and native async clients; bounded ordered async batches retain successful results while omitting worker exception details; CLI pluck selects structured result paths and cannot bypass confidence gates; inspectable typed recipes cover classification, extraction, candidate search, verification, matching, reranking, route proposals, and advisory screening. Caller policy and thresholds remain explicit, and recipes preserve typed evidence without fetching sources or dispatching handlers.
+    public_impact: public
+    decision: accepted
+    target_entry_key: null
+    target_entry_id: null
+    notes: ""
+    stale: false
