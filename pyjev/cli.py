@@ -40,6 +40,8 @@ from .decisions import (
     load_decision,
     load_decisions,
 )
+from .output import OutputPathError, format_json, validate_pluck_path
+from .output import pluck as pluck_value
 from .results import BundleResult, ChoiceResult, NoulResult, ScoreResult
 
 EXIT_OK = 0
@@ -107,10 +109,21 @@ def _state_value(state: str | None, state_file: Path | None, state_json: bool) -
         raise typer.BadParameter(f"State is not valid JSON: {exc}") from exc
 
 
-def _validate_output_options(*, json_output: bool, value_only: bool) -> None:
-    if json_output and value_only:
-        typer.echo("Error: Use either --json or --value, not both.", err=True)
+def _validate_output_options(*, json_output: bool, value_only: bool, pluck: str | None = None) -> None:
+    selected = sum((json_output, value_only, pluck is not None))
+    if selected > 1:
+        typer.echo(
+            "Error: Use either --json or --value, or use --pluck instead; output modes are mutually exclusive.",
+            err=True,
+        )
         raise typer.Exit(code=EXIT_USAGE)
+    if pluck is not None and not pluck.strip():
+        raise typer.BadParameter("--pluck path must be nonempty.")
+    if pluck is not None:
+        try:
+            validate_pluck_path(pluck)
+        except OutputPathError as exc:
+            raise typer.BadParameter(str(exc)) from exc
 
 
 def _validate_min_confidence(value: float | None) -> None:
@@ -119,11 +132,28 @@ def _validate_min_confidence(value: float | None) -> None:
 
 
 def _print_json(data: Any) -> None:
-    typer.echo(json.dumps(data, indent=2, sort_keys=True, ensure_ascii=False))
+    typer.echo(format_json(data))
 
 
-def _emit_result(result: Result, *, json_output: bool, value_only: bool) -> None:
-    _validate_output_options(json_output=json_output, value_only=value_only)
+def _emit_plucked_value(data: Any, path: str) -> None:
+    try:
+        selected = pluck_value(data, path)
+    except OutputPathError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    typer.echo(selected if isinstance(selected, str) else format_json(selected, indent=None))
+
+
+def _emit_result(
+    result: Result,
+    *,
+    json_output: bool,
+    value_only: bool,
+    pluck: str | None = None,
+) -> None:
+    _validate_output_options(json_output=json_output, value_only=value_only, pluck=pluck)
+    if pluck is not None:
+        _emit_plucked_value(result.to_dict(), pluck)
+        return
     if json_output:
         _print_json(result.to_dict())
         return
@@ -155,7 +185,11 @@ def _emit_gate_failure(
     *,
     minimum: float,
     json_output: bool,
+    pluck: str | None = None,
 ) -> None:
+    if pluck is not None:
+        typer.echo("Error: --pluck is unavailable because the confidence gate failed.", err=True)
+        raise typer.Exit(code=EXIT_CONFIDENCE)
     if json_output:
         _print_json(
             {
@@ -181,16 +215,17 @@ def _emit_gated_result(
     json_output: bool,
     value_only: bool,
     minimum: float | None,
+    pluck: str | None = None,
 ) -> None:
     if isinstance(result, NoulResult):
-        _emit_result(result, json_output=json_output, value_only=value_only)
+        _emit_result(result, json_output=json_output, value_only=value_only, pluck=pluck)
         return
     if isinstance(result, BundleResult):
-        _emit_result(result, json_output=json_output, value_only=value_only)
+        _emit_result(result, json_output=json_output, value_only=value_only, pluck=pluck)
         return
     if minimum is not None and _gate_failed(result.confidence, minimum):
-        _emit_gate_failure(result, minimum=minimum, json_output=json_output)
-    _emit_result(result, json_output=json_output, value_only=value_only)
+        _emit_gate_failure(result, minimum=minimum, json_output=json_output, pluck=pluck)
+    _emit_result(result, json_output=json_output, value_only=value_only, pluck=pluck)
 
 
 def _parse_options(options: list[str]) -> dict[str, str | None]:
@@ -251,14 +286,15 @@ def _run_noul(
     model: str | None,
     json_output: bool,
     value_only: bool,
+    pluck: str | None,
 ) -> None:
-    _validate_output_options(json_output=json_output, value_only=value_only)
+    _validate_output_options(json_output=json_output, value_only=value_only, pluck=pluck)
     value = _state_value(state, state_file, state_json)
     result = _run_api(
         lambda jev: jev.noul(question, state=value, true=true, false=false),
         model=model,
     )
-    _emit_result(result, json_output=json_output, value_only=value_only)
+    _emit_result(result, json_output=json_output, value_only=value_only, pluck=pluck)
 
 
 @app.command("ask")
@@ -272,8 +308,9 @@ def ask(
     model: str | None = typer.Option(None, "--model", help="Override the TypeSafe model."),
     json_output: bool = typer.Option(False, "--json", help="Emit JSON."),
     value_only: bool = typer.Option(False, "--value", help="Emit only the numeric Noul value."),
+    pluck: str | None = typer.Option(None, "--pluck", help="Select a dotted key/index path from the result."),
 ) -> None:
-    _run_noul(question, state, state_file, state_json, true, false, model, json_output, value_only)
+    _run_noul(question, state, state_file, state_json, true, false, model, json_output, value_only, pluck)
 
 
 @app.command("noul")
@@ -287,8 +324,9 @@ def noul(
     model: str | None = typer.Option(None, "--model", help="Override the TypeSafe model."),
     json_output: bool = typer.Option(False, "--json", help="Emit JSON."),
     value_only: bool = typer.Option(False, "--value", help="Emit only the numeric Noul value."),
+    pluck: str | None = typer.Option(None, "--pluck", help="Select a dotted key/index path from the result."),
 ) -> None:
-    _run_noul(question, state, state_file, state_json, true, false, model, json_output, value_only)
+    _run_noul(question, state, state_file, state_json, true, false, model, json_output, value_only, pluck)
 
 
 @app.command("choice")
@@ -307,8 +345,9 @@ def choice(
     min_confidence: float | None = typer.Option(None, "--min-confidence", help="Exit 3 below this confidence."),
     json_output: bool = typer.Option(False, "--json", help="Emit JSON."),
     value_only: bool = typer.Option(False, "--value", help="Emit only the selected label."),
+    pluck: str | None = typer.Option(None, "--pluck", help="Select a dotted key/index path from the result."),
 ) -> None:
-    _validate_output_options(json_output=json_output, value_only=value_only)
+    _validate_output_options(json_output=json_output, value_only=value_only, pluck=pluck)
     _validate_min_confidence(min_confidence)
     value = _state_value(state, state_file, state_json)
     choices = _parse_options(option)
@@ -317,6 +356,7 @@ def choice(
         result,
         json_output=json_output,
         value_only=value_only,
+        pluck=pluck,
         minimum=min_confidence,
     )
 
@@ -337,8 +377,9 @@ def score(
     min_confidence: float | None = typer.Option(None, "--min-confidence", help="Exit 3 below this confidence."),
     json_output: bool = typer.Option(False, "--json", help="Emit JSON."),
     value_only: bool = typer.Option(False, "--value", help="Emit only the expected score."),
+    pluck: str | None = typer.Option(None, "--pluck", help="Select a dotted key/index path from the result."),
 ) -> None:
-    _validate_output_options(json_output=json_output, value_only=value_only)
+    _validate_output_options(json_output=json_output, value_only=value_only, pluck=pluck)
     _validate_min_confidence(min_confidence)
     if not 2 <= len(level) <= 10:
         raise typer.BadParameter("Provide between 2 and 10 --level values.")
@@ -348,6 +389,7 @@ def score(
         result,
         json_output=json_output,
         value_only=value_only,
+        pluck=pluck,
         minimum=min_confidence,
     )
 
@@ -373,8 +415,9 @@ def decide(
     min_confidence: float | None = typer.Option(None, "--min-confidence", help="Exit 3 below this confidence."),
     json_output: bool = typer.Option(False, "--json", help="Emit JSON."),
     value_only: bool = typer.Option(False, "--value", help="Emit only the selected value."),
+    pluck: str | None = typer.Option(None, "--pluck", help="Select a dotted key/index path from the result."),
 ) -> None:
-    _validate_output_options(json_output=json_output, value_only=value_only)
+    _validate_output_options(json_output=json_output, value_only=value_only, pluck=pluck)
     _validate_min_confidence(min_confidence)
     try:
         declaration = load_decision(name, config)
@@ -392,6 +435,7 @@ def decide(
         result,
         json_output=json_output,
         value_only=value_only,
+        pluck=pluck,
         minimum=min_confidence,
     )
 
@@ -644,7 +688,9 @@ def decision_compile(
 @app.command("run")
 def run(
     request: str = typer.Argument("-", help="JSON request file, or '-' for stdin."),
+    pluck: str | None = typer.Option(None, "--pluck", help="Select a dotted key/index path from the raw result."),
 ) -> None:
+    _validate_output_options(json_output=False, value_only=False, pluck=pluck)
     text = sys.stdin.read() if request == "-" else _read_text(Path(request))
     try:
         payload = json.loads(text)
@@ -661,7 +707,10 @@ def run(
         lambda jev: jev.run(state=payload["state"], questions=questions),
         model=payload.get("model"),
     )
-    _print_json(result)
+    if pluck is None:
+        _print_json(result)
+    else:
+        _emit_plucked_value(result, pluck)
 
 
 @app.command("models")

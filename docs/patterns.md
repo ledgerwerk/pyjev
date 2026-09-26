@@ -188,6 +188,32 @@ hatches and return the SDK-shaped response dictionary. Use a named bundle when
 the question set is reusable and you want `BundleResult` with typed child
 wrappers. Do not silently change the dynamic `run()` return contract.
 
+## Bounded async fan-out
+
+For independent inputs, use `pyjev.amap` rather than writing an unbounded `asyncio.gather` loop. It bounds active work, preserves input order, and represents per-row execution errors without discarding successful results. Each row is a separate worker invocation; use a bundle when several independent questions share one state and should use a single API request. Batch concurrency is operational capacity, not a confidence or correctness policy.
+
+Worker error details are omitted from the serialized `BatchError` to avoid leaking credentials or user data. A successful result that application policy rejects remains `ok=True`; execution status and judgment policy are separate.
+
+## Rank plus applicability
+
+A closed-set `Choice` always returns a winner. When no candidate may apply, combine Choice ranking with an independent `Noul` applicability judgment rather than treating the top Choice probability as proof that a match exists. The `pyjev.recipes.find` helper packages that pattern and retains both results.
+
+## Explicit escape states
+
+If “none applies,” “unknown,” “other,” or “unclear” is a meaningful domain outcome, model it explicitly in the Choice options or another typed question. A low-confidence answer and a confident judgment that none of the options applies are different signals. Do not inject an escape option automatically where it changes the domain semantics.
+
+## Deterministic candidate discovery
+
+For literal extraction, use Python to find source spans and deduplicate/order/cap them; ask Jev only to select among those exact candidates (plus an explicit `none`). Normalize the chosen literal deterministically in Python. This bounds the model's role and keeps the original literal and typed Choice evidence available for review. See [Semantic recipes](recipes.md#extract-deterministic-literal-candidates).
+
+## Taxonomies and entity matching
+
+Use a single `Choice` for exactly one fixed label, adding an explicit `other` option only when that outcome exists in the domain. For independent multi-label classification, use one Noul per label and expose caller-owned positive/negative thresholds; the middle band stays `unclear`. Entity matching is categorical (`same`, `unclear`, `different`), not a numeric score whose weighted position is mistaken for the relation.
+
+## Proposals, independent reranking, and advisory screens
+
+A route helper may return a typed proposal and closed arguments, but the application decides whether to dispatch it; pyjev never calls a handler. Use reranking when each candidate should receive an independent relevance judgment and zero, one, or many may qualify; it is distinct from `find`'s competing Choice plus existence judgment. Semantic screening is advisory only: preserve each signal, calibrate thresholds locally, and never treat `pass` as a security guarantee.
+
 ## All four patterns together
 
 `examples/support_triage.py` combines the patterns in one support workflow. Its

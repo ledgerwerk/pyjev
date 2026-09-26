@@ -9,9 +9,9 @@ from typing import Any, overload
 
 from typesafe_sdk import AsyncTypeSafeClient, Question, TypeSafeClient
 
-from .compile import build_choice, build_decision_questions, build_noul, build_score
+from .compile import build_choice, build_decision_questions, build_noul, build_score, validate_runtime_decision
 from .credentials import get_api_key
-from .decisions import BundleDecision, ChoiceDecision, NoulDecision, ScoreDecision, load_decision
+from .decisions import BundleDecision, ChoiceDecision, Decision, NoulDecision, ScoreDecision, load_decision
 from .results import BundleResult, ChoiceResult, NoulResult, PrimitiveResult, ScoreResult
 
 
@@ -170,6 +170,35 @@ class Jev:
         )
         return _primitive_result(response, "answer", ScoreDecision("answer", str(question), tuple(values)))
 
+    def evaluate(
+        self,
+        decision: Decision,
+        *,
+        state: Any,
+        model: str | None = None,
+    ) -> NoulResult | ChoiceResult | ScoreResult | BundleResult:
+        """Evaluate a validated in-memory typed decision declaration.
+
+        An explicit ``model`` overrides the declaration's model. A bundle is sent
+        in one SDK request and each child is returned as its normal typed result.
+        Decision construction and this method's local validation do not resolve
+        credentials; only the call to the underlying SDK performs I/O.
+        """
+        validate_runtime_decision(decision)
+        effective_model = model if model is not None else decision.model
+        questions = build_decision_questions(decision)
+        response = self._client.system_one(state=state, questions=questions, model=effective_model)
+        if isinstance(decision, BundleDecision):
+            answers = {name: _primitive_result(response, name, child) for name, child in decision.questions.items()}
+            return BundleResult(
+                answers=answers,
+                model=response.model,
+                usage=_usage(response),
+                raw=response.model_dump(mode="json"),
+                request_id=_request_id(response),
+            )
+        return _primitive_result(response, "answer", decision)
+
     def decide(
         self,
         name: str,
@@ -180,20 +209,7 @@ class Jev:
     ) -> NoulResult | ChoiceResult | ScoreResult | BundleResult:
         """Evaluate a named primitive or bundle decision from TOML."""
         decision = load_decision(name, config)
-        effective_model = model if model is not None else decision.model
-        if isinstance(decision, BundleDecision):
-            return self._bundle(decision, state=state, model=effective_model)
-        if isinstance(decision, NoulDecision):
-            return self.noul(
-                decision.question,
-                state=state,
-                true=decision.true,
-                false=decision.false,
-                model=effective_model,
-            )
-        if isinstance(decision, ChoiceDecision):
-            return self.choice(decision.question, state=state, choices=decision.options, model=effective_model)
-        return self.score(decision.question, state=state, levels=decision.levels, model=effective_model)
+        return self.evaluate(decision, state=state, model=model)
 
     def _bundle(self, decision: BundleDecision, *, state: Any, model: str | None) -> BundleResult:
         questions = build_decision_questions(decision)
@@ -336,6 +352,33 @@ class AsyncJev:
         )
         return _primitive_result(response, "answer", ScoreDecision("answer", str(question), tuple(values)))
 
+    async def evaluate(
+        self,
+        decision: Decision,
+        *,
+        state: Any,
+        model: str | None = None,
+    ) -> NoulResult | ChoiceResult | ScoreResult | BundleResult:
+        """Evaluate an in-memory decision using the native async SDK client.
+
+        An explicit ``model`` overrides the declaration's model. Independent bundle
+        questions share one SDK request and retain their primitive result types.
+        """
+        validate_runtime_decision(decision)
+        effective_model = model if model is not None else decision.model
+        questions = build_decision_questions(decision)
+        response = await self._client.system_one(state=state, questions=questions, model=effective_model)
+        if isinstance(decision, BundleDecision):
+            answers = {name: _primitive_result(response, name, child) for name, child in decision.questions.items()}
+            return BundleResult(
+                answers=answers,
+                model=response.model,
+                usage=_usage(response),
+                raw=response.model_dump(mode="json"),
+                request_id=_request_id(response),
+            )
+        return _primitive_result(response, "answer", decision)
+
     async def decide(
         self,
         name: str,
@@ -346,34 +389,7 @@ class AsyncJev:
     ) -> NoulResult | ChoiceResult | ScoreResult | BundleResult:
         """Evaluate a named primitive or bundle asynchronously."""
         decision = load_decision(name, config)
-        effective_model = model if model is not None else decision.model
-        if isinstance(decision, BundleDecision):
-            questions = build_decision_questions(decision)
-            response = await self._client.system_one(state=state, questions=questions, model=effective_model)
-            answers = {name: _primitive_result(response, name, child) for name, child in decision.questions.items()}
-            return BundleResult(
-                answers=answers,
-                model=response.model,
-                usage=_usage(response),
-                raw=response.model_dump(mode="json"),
-                request_id=_request_id(response),
-            )
-        if isinstance(decision, NoulDecision):
-            return await self.noul(
-                decision.question,
-                state=state,
-                true=decision.true,
-                false=decision.false,
-                model=effective_model,
-            )
-        if isinstance(decision, ChoiceDecision):
-            return await self.choice(
-                decision.question,
-                state=state,
-                choices=decision.options,
-                model=effective_model,
-            )
-        return await self.score(decision.question, state=state, levels=decision.levels, model=effective_model)
+        return await self.evaluate(decision, state=state, model=model)
 
     async def run(
         self,

@@ -42,6 +42,23 @@ product.
 result wrappers are a stable Python-facing contract; the distinction is not
 that `jev-cli` discards uncertainty.
 
+## pyjev and Nasrallah-AL/jev-cli
+
+This is a separate comparison from the `tumf/jev-cli` section above. It covers `Nasrallah-AL/jev-cli`, the TypeScript project distributed as npm package `jevctl` 0.2.3, executable `jev`, at main commit `a1e668164e75d7fc80cc4a51aaeb1d0144d8961f` (reviewed 2026-09-25). It is a dated snapshot, not a winner/loser ranking or a claim about future releases.
+
+| Capability              | pyjev                                                                | Nasrallah `jev-cli`                                                           |
+| ----------------------- | -------------------------------------------------------------------- | ----------------------------------------------------------------------------- |
+| Primary product         | Python application decision layer over the official SDK              | Purpose-built TypeScript CLI/library semantic operations                      |
+| Named project contracts | `.pyjev.toml`, offline validation and compilation                    | Different configuration and request-inspection model                          |
+| Semantic operations     | Typed primitives and recipes such as `find`, `extract`, and `verify` | `verify`, `classify`, `extract`, `match`, `route`, `find`, `rerank`, and more |
+| Generic batch           | Native async `pyjev.amap` with ordered records                       | Batch command and library support                                             |
+| Transport boundary      | Official `typesafe-sdk`; no provider translation                     | Provider selection/translation including multiple providers                   |
+| Output                  | JSON, confidence-safe `--value`, and structured `--pluck`            | JSON/JSONL and rich pluck/output options                                      |
+| Agent workflow          | Inspect-first skill and reusable Python API                          | Skill plus project-specific plugin/hooks                                      |
+| Transcript compaction   | Not in pyjev core                                                    | Agent-runtime-oriented compact operation                                      |
+
+The useful lesson is the semantic recipe layer and operational UX, not copying the external CLI's entire product boundary. pyjev keeps named contracts, offline inspection, typed uncertainty, explicit caller policy, and the official SDK transport boundary. Its recipes compose those foundations without invoking handlers or owning provider behavior.
+
 ## Architecture
 
 A pyjev named decision flows through a validated repository declaration:

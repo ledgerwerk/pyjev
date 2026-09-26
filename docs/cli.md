@@ -16,6 +16,10 @@ as JSON.
 
 `--json` and `--value` cannot be combined.
 
+`--pluck PATH` selects from the same structured dictionary used by `.to_dict()` (and by `--json`). It is available on `ask`/`noul`, `choice`, `score`, `decide`, and raw `run`; `run` already emits structured JSON and therefore needs no `--json` flag. It supports dotted keys and numeric array indexes, such as `--pluck choice`, `--pluck answers.intent.choice`, or `--pluck results[0].verdict. A missing key, bad index, or malformed path is an error; selectors never silently emit empty output. On commands that expose the flags, `--json`, `--value`, and `--pluck` are mutually exclusive.
+
+A pluck selector cannot bypass an active confidence gate: when `--min-confidence` fails, `--pluck` is unavailable, stdout remains empty, and the command exits 3. For a failed gate, use the existing `--json` gate envelope or consume the exit status instead.
+
 ## Commands
 
 Primitive commands are `ask`/`noul`, `choice`, and `score`. Named decisions use `decide`.

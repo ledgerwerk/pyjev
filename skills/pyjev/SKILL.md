@@ -55,6 +55,23 @@ other deterministic constraints. Use a named Jev decision for a stable
 judgment contract. If criteria are dynamic, build them with `Jev` or
 `AsyncJev` after deterministic filtering.
 
+## Choosing a semantic recipe
+
+- Stable reusable contract: use `.pyjev.toml`; inspect, validate, and compile offline first.
+- Candidate ranking with a meaningful no-match result: use `pyjev.recipes.find` (Choice plus separate Noul applicability).
+- Literal extraction: use deterministic regex/custom candidate discovery and `pyjev.recipes.extract`; Jev can select only an actual source literal or `none`.
+- Check supplied claims against supplied evidence: use `pyjev.recipes.verify`; `unsupported` is not `contradicted`, and evidence is never fetched automatically.
+- Fixed taxonomy: use `pyjev.recipes.classify`; multi-label mode uses independent Nouls and an explicit unclear band.
+- Entity linkage: use `pyjev.recipes.match` for categorical `same` / `unclear` / `different` results.
+- Independent candidate scoring: use `pyjev.recipes.rerank`, not `find`, when zero, one, or many candidates may qualify.
+- `pyjev.recipes.screen` is advisory only; a `pass` result does not make untrusted content safe.
+- Many independent inputs: use `pyjev.amap` with explicit bounded concurrency and inspect ordered row results/errors.
+- Routing recipes return a typed proposal only. Application code owns handlers, thresholds, and side effects.
+
+Before recipe execution, inspect its `build_*` plan for exact request state, IDs, candidate/source limits, and caller policy. Do not send sensitive content without review. Keep the full typed result when a human may need confidence, probabilities, usage, model, request ID, or raw evidence.
+
+`--pluck PATH` selects a field from the structured result, but it is mutually exclusive with `--json` and `--value`. It is unavailable when a confidence gate fails; never use it to expose a rejected actionable value. Use the exit code or the gate JSON envelope for review.
+
 ## Credential safety
 
 Do not place keys in `.pyjev.toml`, prompts, skill files, command arguments, or

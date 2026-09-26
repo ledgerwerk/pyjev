@@ -7,8 +7,11 @@ from importlib.metadata import version as package_version
 from pathlib import Path
 from typing import Any
 
+from .batch import BatchError, BatchRecord, BatchResult, BatchSummary, amap
 from .client import AsyncJev, Jev
 from .compile import CompiledDecision, compile_decision
+from .decisions import BundleDecision, ChoiceDecision, Decision, NoulDecision, ScoreDecision
+from .output import OutputPathError, format_json, format_jsonl, format_markdown, pluck, validate_pluck_path
 from .pipeline import Accepted, GateEvidence, Rejected
 from .results import BundleResult, ChoiceResult, NoulResult, ScoreResult
 
@@ -36,15 +39,31 @@ def decide(
 
 __all__ = [
     "Accepted",
+    "amap",
+    "BatchError",
+    "BatchRecord",
+    "BatchResult",
+    "BatchSummary",
     "GateEvidence",
     "Rejected",
+    "OutputPathError",
+    "format_json",
+    "format_jsonl",
+    "format_markdown",
+    "pluck",
+    "validate_pluck_path",
     "BundleResult",
+    "BundleDecision",
+    "ChoiceDecision",
+    "Decision",
     "CompiledDecision",
     "AsyncJev",
     "ChoiceResult",
     "Jev",
     "NoulResult",
+    "NoulDecision",
     "ScoreResult",
+    "ScoreDecision",
     "compile_decision",
     "__version__",
     "decide",

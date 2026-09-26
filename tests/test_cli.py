@@ -6,6 +6,7 @@ from typer.testing import CliRunner
 import pyjev.cli as cli
 from pyjev.cli import app
 from pyjev.credentials import CredentialError
+from pyjev.results import ChoiceResult
 
 runner = CliRunner()
 
@@ -275,3 +276,185 @@ def test_auth_status_handles_credential_file_error(monkeypatch):
 
     assert result.exit_code == 1
     assert "Could not read credential file" in result.output
+
+
+class FakeChoiceJev:
+    def __init__(self, confidence: float = 0.95):
+        self.confidence = confidence
+        self.calls = 0
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        return None
+
+    def choice(self, question, *, state, choices):
+        del question, state, choices
+        self.calls += 1
+        return ChoiceResult(
+            value="engineering",
+            confidence=self.confidence,
+            probabilities={"billing": 1 - self.confidence, "engineering": self.confidence},
+            model="test-model",
+            usage={},
+            raw={"choice": "engineering", "confidence": self.confidence},
+            request_id="test-request",
+        )
+
+
+def test_cli_pluck_selects_from_public_result_dictionary(monkeypatch):
+    fake = FakeChoiceJev()
+    monkeypatch.setattr(cli, "Jev", lambda **kwargs: fake)
+    result = runner.invoke(
+        app,
+        [
+            "choice",
+            "Route?",
+            "--state",
+            "ticket",
+            "--option",
+            "billing",
+            "--option",
+            "engineering",
+            "--pluck",
+            "choice",
+        ],
+    )
+    assert result.exit_code == 0
+    assert result.stdout.strip() == "engineering"
+    assert fake.calls == 1
+
+
+def test_cli_pluck_missing_path_is_an_error(monkeypatch):
+    fake = FakeChoiceJev()
+    monkeypatch.setattr(cli, "Jev", lambda **kwargs: fake)
+    result = runner.invoke(
+        app,
+        [
+            "choice",
+            "Route?",
+            "--state",
+            "ticket",
+            "--option",
+            "billing",
+            "--option",
+            "engineering",
+            "--pluck",
+            "missing",
+        ],
+    )
+    assert result.exit_code == 2
+    assert "no key 'missing'" in result.output
+
+
+def test_cli_pluck_cannot_bypass_a_failed_confidence_gate(monkeypatch):
+    fake = FakeChoiceJev(confidence=0.4)
+    monkeypatch.setattr(cli, "Jev", lambda **kwargs: fake)
+    result = runner.invoke(
+        app,
+        [
+            "choice",
+            "Route?",
+            "--state",
+            "ticket",
+            "--option",
+            "billing",
+            "--option",
+            "engineering",
+            "--min-confidence",
+            "0.8",
+            "--pluck",
+            "choice",
+        ],
+    )
+    assert result.exit_code == cli.EXIT_CONFIDENCE
+    assert result.stdout == ""
+    assert "--pluck is unavailable" in result.stderr
+    assert "engineering" not in result.output
+
+
+def test_cli_json_gate_keeps_explicit_result_wrapper(monkeypatch):
+    fake = FakeChoiceJev(confidence=0.4)
+    monkeypatch.setattr(cli, "Jev", lambda **kwargs: fake)
+    result = runner.invoke(
+        app,
+        [
+            "choice",
+            "Route?",
+            "--state",
+            "ticket",
+            "--option",
+            "billing",
+            "--option",
+            "engineering",
+            "--min-confidence",
+            "0.8",
+            "--json",
+        ],
+    )
+    assert result.exit_code == cli.EXIT_CONFIDENCE
+    payload = json.loads(result.stdout)
+    assert payload["gate"]["passed"] is False
+    assert payload["result"]["choice"] == "engineering"
+
+
+def test_cli_rejects_competing_output_flags_before_api(monkeypatch):
+    fake = FakeChoiceJev()
+    monkeypatch.setattr(cli, "Jev", lambda **kwargs: fake)
+    result = runner.invoke(
+        app,
+        [
+            "choice",
+            "Route?",
+            "--state",
+            "ticket",
+            "--option",
+            "billing",
+            "--option",
+            "engineering",
+            "--json",
+            "--pluck",
+            "choice",
+        ],
+    )
+    assert result.exit_code == cli.EXIT_USAGE
+    assert fake.calls == 0
+
+
+def test_cli_rejects_malformed_pluck_path_before_api(monkeypatch):
+    fake = FakeChoiceJev()
+    monkeypatch.setattr(cli, "Jev", lambda **kwargs: fake)
+    result = runner.invoke(
+        app,
+        [
+            "choice",
+            "Route?",
+            "--state",
+            "ticket",
+            "--option",
+            "billing",
+            "--option",
+            "engineering",
+            "--pluck",
+            "answers..value",
+        ],
+    )
+    assert result.exit_code == 2
+    assert "invalid pluck path" in result.output
+    assert fake.calls == 0
+
+
+def test_run_supports_structured_pluck(monkeypatch):
+    monkeypatch.setattr(
+        cli,
+        "_run_api",
+        lambda action, *, model=None: {"answers": {"intent": {"value": "billing"}}},
+    )
+    result = runner.invoke(
+        app,
+        ["run", "--pluck", "answers.intent.value"],
+        input='{"state":"ticket","questions":{"intent":"Where should this go?"}}',
+    )
+    assert result.exit_code == 0
+    assert result.stdout.strip() == "billing"

@@ -21,6 +21,27 @@ The context manager closes clients created by `Jev`.
 All validation happens before the SDK call. Results preserve uncertainty instead of
 collapsing to a scalar convenience value.
 
+## In-memory decisions
+
+The same typed decision declarations used by named contracts can be assembled at runtime. They are public constructors and can be evaluated without writing a `.pyjev.toml` file:
+
+```python
+from pyjev import BundleDecision, ChoiceDecision, Jev, NoulDecision
+
+decision = BundleDecision(
+    name="ticket-triage",
+    questions={
+        "route": ChoiceDecision("route", "Which team?", {"billing": None, "engineering": None}),
+        "refund": NoulDecision("refund", "Is a refund requested?"),
+    },
+)
+
+with Jev(model="jev-latest") as jev:
+    result = jev.evaluate(decision, state={"message": "Checkout failed; please refund me."})
+```
+
+`Jev.evaluate()` and `AsyncJev.evaluate()` accept `NoulDecision`, `ChoiceDecision`, `ScoreDecision`, and `BundleDecision`. Explicit `model=` overrides the declaration's model; otherwise the declaration model is used. A bundle shares one request and returns the usual typed child results in a `BundleResult`. Child model overrides are not allowed, matching named bundle rules. Constructing and locally validating decisions does not resolve credentials or make a request. `decide()` remains the convenient interface for declarations stored in `.pyjev.toml`.
+
 ## Named decisions
 
 ```python
@@ -119,3 +140,29 @@ async with AsyncJev() as jev:
 ```
 
 It uses `AsyncTypeSafeClient` directly and does not hide synchronous work in a thread pool.
+
+## Bounded async batches
+
+Use `amap` for independent states that can be evaluated concurrently. It preserves input order, returns one `BatchRecord` per input, and aggregates token usage from successful typed results:
+
+```python
+from pyjev import AsyncJev, amap
+
+async with AsyncJev() as jev:
+    batch = await amap(
+        tickets,
+        lambda ticket: jev.decide("ticket-triage", state=ticket.state),
+        concurrency=4,
+        ids=[ticket.id for ticket in tickets],
+    )
+
+for row in batch.records:
+    if row.ok:
+        consume(row.id, row.result)
+    else:
+        log_failure(row.id, row.error.kind)
+
+print(batch.summary.to_dict())
+```
+
+Failures are row-local by default. `fail_fast=True` stops scheduling after the first observed failure, waits for already-running workers, and marks the remaining rows `not_started`. Worker exception text is deliberately omitted from `BatchError` because it may contain secrets or user data. Cancellation cancels workers and propagates rather than returning a partial result. The batch layer adds no retries; SDK behavior is unchanged. A policy rejection inside a successful result is still an execution success, not a batch error.

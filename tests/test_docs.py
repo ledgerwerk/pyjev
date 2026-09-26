@@ -19,6 +19,7 @@ def test_documentation_tree_and_build_script_are_present() -> None:
         "agent-skill.md",
         "debugging.md",
         "examples.md",
+        "recipes.md",
         "comparisons.md",
         "development.md",
         "changelog.md",
@@ -35,6 +36,7 @@ def test_documentation_emphasizes_decision_contracts_and_boundaries() -> None:
     comparison = (ROOT / "docs" / "comparisons.md").read_text(encoding="utf-8")
     skill = (ROOT / "skills" / "pyjev" / "SKILL.md").read_text(encoding="utf-8")
     patterns = (ROOT / "docs" / "patterns.md").read_text(encoding="utf-8")
+    recipes = (ROOT / "docs" / "recipes.md").read_text(encoding="utf-8")
     examples = (ROOT / "examples" / "README.md").read_text(encoding="utf-8")
     assert readme.index("decision contracts") < readme.index("Direct dynamic decisions")
     assert "`typesafe-sdk`" in readme
@@ -48,4 +50,9 @@ def test_documentation_emphasizes_decision_contracts_and_boundaries() -> None:
     assert "Composite scoring" in patterns
     assert "Confidence-gated routing" in patterns
     assert "Speculative fan-out" in patterns
+    assert "## Classify" in recipes
+    assert "## Match" in recipes
+    assert "## Route" in recipes and "never calls `application_dispatch`" in recipes
+    assert "## Rerank" in recipes
+    assert "## Screen" in recipes and "security boundary" in recipes
     assert "support_triage.py" in examples

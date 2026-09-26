@@ -51,3 +51,7 @@ Choose and document an application policy explicitly when using Noul.
 The numeric exit codes are part of pyjev's CLI contract, not a Jev or cross-tool
 standard. Do not assume they match `jev-cli`; a pyjev exit `3` specifically means
 the returned Choice/Score result did not satisfy the caller's threshold.
+
+## Calibrate thresholds and pin models
+
+For calibrated production policy, run representative labeled examples, inspect confidence/probability distributions and error consequences, then record the chosen caller thresholds. Pin an explicit model version for the calibrated workflow and deliberately re-evaluate/re-calibrate before changing that model version; an alias can change underneath a fixed threshold. A pinned model makes version changes visible but does not eliminate data drift or guarantee correctness.

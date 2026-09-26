@@ -128,6 +128,48 @@ def _question_to_dict(question: Question) -> dict[str, Any]:
     return dict(question)
 
 
+def validate_runtime_decision(decision: Decision) -> Decision:
+    """Validate an in-memory decision without creating a client or making a request.
+
+    Dynamic declarations share the same question builders and basic invariants as
+    named contracts, but bundle children cannot define their own model override.
+    """
+    if isinstance(decision, BundleDecision):
+        if not isinstance(decision.name, str) or not decision.name.strip():
+            raise ValueError("bundle decision name must be a nonempty string")
+        if not isinstance(decision.questions, Mapping) or not decision.questions:
+            raise ValueError("bundle decision requires at least one question")
+        if decision.model is not None and (not isinstance(decision.model, str) or not decision.model.strip()):
+            raise ValueError("decision model must be a nonempty string or None")
+        for name, child in decision.questions.items():
+            if not isinstance(name, str) or not name.strip():
+                raise ValueError("bundle question names must be nonempty strings")
+            if not isinstance(child, (NoulDecision, ChoiceDecision, ScoreDecision)):
+                raise TypeError(f"unsupported decision type for bundle question {name!r}")
+            if child.name != name:
+                raise ValueError(f"bundle question key {name!r} must match child decision name {child.name!r}")
+            if child.model is not None:
+                raise ValueError("child model overrides are not allowed in a bundle")
+            _validate_runtime_primitive(child)
+        return decision
+    if not isinstance(decision, (NoulDecision, ChoiceDecision, ScoreDecision)):
+        raise TypeError(f"unsupported decision type: {type(decision).__name__}")
+    _validate_runtime_primitive(decision)
+    return decision
+
+
+def _validate_runtime_primitive(decision: NoulDecision | ChoiceDecision | ScoreDecision) -> None:
+    if not isinstance(decision.name, str) or not decision.name.strip():
+        raise ValueError("decision name must be a nonempty string")
+    if not isinstance(decision.question, str) or not decision.question.strip():
+        raise ValueError("decision question must be a nonempty string")
+    if decision.model is not None and (not isinstance(decision.model, str) or not decision.model.strip()):
+        raise ValueError("decision model must be a nonempty string or None")
+    # Constructing the SDK question performs the same local type/cardinality checks
+    # as named decisions and never resolves credentials or performs network I/O.
+    build_question(decision)
+
+
 def compile_decision(
     name: str,
     *,

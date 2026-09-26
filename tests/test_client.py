@@ -6,7 +6,7 @@ from typing import cast
 import pytest
 from typesafe_sdk import TypeSafeClient
 
-from pyjev import Jev
+from pyjev import ChoiceDecision, Jev, NoulDecision, ScoreDecision
 
 
 class Dumpable(SimpleNamespace):
@@ -189,3 +189,37 @@ def test_named_decision_uses_config_model_when_call_model_absent(tmp_path):
     client = FakeClient()
     Jev(client=_as_client(client)).decide("route", state="ticket", config=config)
     assert client.calls[-1][2] == "decision-model"
+
+
+@pytest.mark.parametrize(
+    ("decision", "expected_value"),
+    [
+        (NoulDecision("yes-no", "Is this correct?"), 0.91),
+        (ChoiceDecision("route", "Which team?", {"billing": None, "engineering": None}), "engineering"),
+        (ScoreDecision("priority", "How urgent?", ("low", "normal", "urgent")), 2.7),
+    ],
+)
+def test_evaluate_in_memory_primitives(decision, expected_value):
+    client = FakeClient()
+    result = Jev(client=_as_client(client)).evaluate(decision, state={"ticket": "details"})
+    assert result.value == expected_value
+    assert len(client.calls) == 1
+    assert client.calls[0][0] == {"ticket": "details"}
+
+
+def test_evaluate_uses_explicit_model_then_declaration_model():
+    client = FakeClient()
+    jev = Jev(client=_as_client(client))
+    decision = ChoiceDecision("route", "Which team?", {"billing": None, "engineering": None}, model="declared")
+    jev.evaluate(decision, state="ticket")
+    assert client.calls[-1][2] == "declared"
+    jev.evaluate(decision, state="ticket", model="override")
+    assert client.calls[-1][2] == "override"
+
+
+def test_evaluate_rejects_invalid_runtime_decision_before_request():
+    client = FakeClient()
+    decision = ChoiceDecision("route", "Which team?", {"only": None})
+    with pytest.raises(ValueError, match="between 2 and 255"):
+        Jev(client=_as_client(client)).evaluate(decision, state="ticket")
+    assert client.calls == []

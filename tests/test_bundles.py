@@ -8,7 +8,7 @@ import pytest
 from typer.testing import CliRunner
 from typesafe_sdk import TypeSafeClient
 
-from pyjev import BundleResult, ChoiceResult, Jev, ScoreResult
+from pyjev import BundleResult, ChoiceDecision, ChoiceResult, Jev, NoulDecision, NoulResult, ScoreDecision, ScoreResult
 from pyjev.cli import app
 from pyjev.decisions import BundleDecision, DecisionConfigError, load_decision
 
@@ -130,6 +130,28 @@ def test_bundle_uses_one_call_and_preserves_each_result(tmp_path: Path) -> None:
     assert isinstance(urgency, ScoreResult)
     assert urgency.legend[3] == "critical"
     assert result.request_id == "request-bundle"
+
+
+def test_in_memory_bundle_uses_one_call_and_preserves_typed_children() -> None:
+    client = BundleClient()
+    decision = BundleDecision(
+        name="runtime-triage",
+        model="declared-model",
+        questions={
+            "refund": NoulDecision("refund", "Refund requested?"),
+            "route": ChoiceDecision("route", "Which team?", {"billing": None, "engineering": None}),
+            "urgency": ScoreDecision("urgency", "How urgent?", ("low", "normal", "urgent", "critical")),
+        },
+    )
+    result = Jev(client=_as_client(client)).evaluate(decision, state={"ticket": "details"}, model="override-model")
+    assert isinstance(result, BundleResult)
+    assert len(client.calls) == 1
+    assert client.calls[0][2] == "override-model"
+    assert isinstance(result.answers["refund"], NoulResult)
+    assert isinstance(result.answers["route"], ChoiceResult)
+    assert result.answers["route"].probabilities["engineering"] == 0.91
+    assert isinstance(result.answers["urgency"], ScoreResult)
+    assert result.answers["urgency"].legend[3] == "critical"
 
 
 def test_bundle_cli_rejects_value_and_confidence_before_api(tmp_path: Path, monkeypatch) -> None:
