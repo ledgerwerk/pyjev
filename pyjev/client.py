@@ -7,12 +7,14 @@ from pathlib import Path
 from types import TracebackType
 from typing import Any, overload
 
-from typesafe_sdk import AsyncTypeSafeClient, Question, TypeSafeClient
+from typesafe_sdk import Asset, AsyncTypeSafeClient, Question, TypeSafeClient
 
 from .compile import build_choice, build_decision_questions, build_noul, build_score, validate_runtime_decision
 from .credentials import get_api_key
 from .decisions import BundleDecision, ChoiceDecision, Decision, NoulDecision, ScoreDecision, load_decision
 from .results import BundleResult, ChoiceResult, NoulResult, PrimitiveResult, ScoreResult
+
+_IMAGE_HEADERS = {"TypeSafe-Danger-Zone-Images": "true"}
 
 
 def _request_id(response: Any) -> str | None:
@@ -88,6 +90,7 @@ class Jev:
         api_key: str | None = None,
         model: str | None = None,
         timeout: float | None = None,
+        images: bool = False,
         client: TypeSafeClient | None = None,
     ) -> None:
         """Create a client or wrap a caller-owned SDK client.
@@ -98,9 +101,25 @@ class Jev:
         if client is not None and any(value is not None for value in (api_key, model, timeout)):
             raise ValueError("api_key, model, and timeout cannot be used with an injected client")
         self._owns_client = client is None
+        self._images = images
         self._client = (
             client if client is not None else TypeSafeClient(api_key=get_api_key(api_key), model=model, timeout=timeout)
         )
+
+    def _system_one(
+        self,
+        *,
+        state: Any,
+        questions: Mapping[str, Question],
+        model: str | None,
+        assets: Mapping[str, Asset] | None = None,
+    ) -> Any:
+        kwargs: dict[str, Any] = {"state": state, "questions": questions, "model": model}
+        if assets is not None:
+            kwargs["assets"] = assets
+        if self._images:
+            kwargs["extra_headers"] = _IMAGE_HEADERS
+        return self._client.system_one(**kwargs)
 
     @property
     def client(self) -> TypeSafeClient:
@@ -115,9 +134,10 @@ class Jev:
         true: Any | None = None,
         false: Any | None = None,
         model: str | None = None,
+        assets: Mapping[str, Asset] | None = None,
     ) -> NoulResult:
         """Alias for :meth:`noul`."""
-        return self.noul(question, state=state, true=true, false=false, model=model)
+        return self.noul(question, state=state, true=true, false=false, model=model, assets=assets)
 
     def noul(
         self,
@@ -127,12 +147,14 @@ class Jev:
         true: Any | None = None,
         false: Any | None = None,
         model: str | None = None,
+        assets: Mapping[str, Asset] | None = None,
     ) -> NoulResult:
         """Evaluate a yes/no question and preserve the probability of true."""
-        response = self._client.system_one(
+        response = self._system_one(
             state=state,
             questions={"answer": build_noul(question, true=true, false=false)},
             model=model,
+            assets=assets,
         )
         return _primitive_result(response, "answer", NoulDecision("answer", str(question), true, false, model))
 
@@ -143,13 +165,15 @@ class Jev:
         state: Any,
         choices: Mapping[str, Any | None] | Sequence[str],
         model: str | None = None,
+        assets: Mapping[str, Asset] | None = None,
     ) -> ChoiceResult:
         """Evaluate a closed-set Choice question."""
         criteria = dict(choices) if isinstance(choices, Mapping) else {label: None for label in choices}
-        response = self._client.system_one(
+        response = self._system_one(
             state=state,
             questions={"answer": build_choice(question, criteria)},
             model=model,
+            assets=assets,
         )
         return _primitive_result(response, "answer", ChoiceDecision("answer", str(question), criteria))
 
@@ -160,13 +184,15 @@ class Jev:
         state: Any,
         levels: Sequence[Any],
         model: str | None = None,
+        assets: Mapping[str, Asset] | None = None,
     ) -> ScoreResult:
         """Evaluate state against an ordered Score rubric."""
         values = list(levels)
-        response = self._client.system_one(
+        response = self._system_one(
             state=state,
             questions={"answer": build_score(question, values)},
             model=model,
+            assets=assets,
         )
         return _primitive_result(response, "answer", ScoreDecision("answer", str(question), tuple(values)))
 
@@ -176,6 +202,7 @@ class Jev:
         *,
         state: Any,
         model: str | None = None,
+        assets: Mapping[str, Asset] | None = None,
     ) -> NoulResult | ChoiceResult | ScoreResult | BundleResult:
         """Evaluate a validated in-memory typed decision declaration.
 
@@ -187,7 +214,7 @@ class Jev:
         validate_runtime_decision(decision)
         effective_model = model if model is not None else decision.model
         questions = build_decision_questions(decision)
-        response = self._client.system_one(state=state, questions=questions, model=effective_model)
+        response = self._system_one(state=state, questions=questions, model=effective_model, assets=assets)
         if isinstance(decision, BundleDecision):
             answers = {name: _primitive_result(response, name, child) for name, child in decision.questions.items()}
             return BundleResult(
@@ -206,14 +233,22 @@ class Jev:
         state: Any,
         config: str | Path | None = None,
         model: str | None = None,
+        assets: Mapping[str, Asset] | None = None,
     ) -> NoulResult | ChoiceResult | ScoreResult | BundleResult:
         """Evaluate a named primitive or bundle decision from TOML."""
         decision = load_decision(name, config)
-        return self.evaluate(decision, state=state, model=model)
+        return self.evaluate(decision, state=state, model=model, assets=assets)
 
-    def _bundle(self, decision: BundleDecision, *, state: Any, model: str | None) -> BundleResult:
+    def _bundle(
+        self,
+        decision: BundleDecision,
+        *,
+        state: Any,
+        model: str | None,
+        assets: Mapping[str, Asset] | None = None,
+    ) -> BundleResult:
         questions = build_decision_questions(decision)
-        response = self._client.system_one(state=state, questions=questions, model=model)
+        response = self._system_one(state=state, questions=questions, model=model, assets=assets)
         answers = {name: _primitive_result(response, name, child) for name, child in decision.questions.items()}
         return BundleResult(
             answers=answers,
@@ -229,9 +264,10 @@ class Jev:
         state: Any,
         questions: Mapping[str, Question],
         model: str | None = None,
+        assets: Mapping[str, Asset] | None = None,
     ) -> dict[str, Any]:
         """Evaluate several independent SDK questions in one request."""
-        response = self._client.system_one(state=state, questions=questions, model=model)
+        response = self._system_one(state=state, questions=questions, model=model, assets=assets)
         return response.model_dump(mode="json")
 
     def models(self) -> list[dict[str, Any]]:
@@ -272,17 +308,34 @@ class AsyncJev:
         api_key: str | None = None,
         model: str | None = None,
         timeout: float | None = None,
+        images: bool = False,
         client: AsyncTypeSafeClient | None = None,
     ) -> None:
         """Create an async client without simulating async over synchronous I/O."""
         if client is not None and any(value is not None for value in (api_key, model, timeout)):
             raise ValueError("api_key, model, and timeout cannot be used with an injected client")
         self._owns_client = client is None
+        self._images = images
         self._client = (
             client
             if client is not None
             else AsyncTypeSafeClient(api_key=get_api_key(api_key), model=model, timeout=timeout)
         )
+
+    async def _system_one(
+        self,
+        *,
+        state: Any,
+        questions: Mapping[str, Question],
+        model: str | None,
+        assets: Mapping[str, Asset] | None = None,
+    ) -> Any:
+        kwargs: dict[str, Any] = {"state": state, "questions": questions, "model": model}
+        if assets is not None:
+            kwargs["assets"] = assets
+        if self._images:
+            kwargs["extra_headers"] = _IMAGE_HEADERS
+        return await self._client.system_one(**kwargs)
 
     @property
     def client(self) -> AsyncTypeSafeClient:
@@ -297,9 +350,10 @@ class AsyncJev:
         true: Any | None = None,
         false: Any | None = None,
         model: str | None = None,
+        assets: Mapping[str, Asset] | None = None,
     ) -> NoulResult:
         """Async alias for :meth:`noul`."""
-        return await self.noul(question, state=state, true=true, false=false, model=model)
+        return await self.noul(question, state=state, true=true, false=false, model=model, assets=assets)
 
     async def noul(
         self,
@@ -309,12 +363,14 @@ class AsyncJev:
         true: Any | None = None,
         false: Any | None = None,
         model: str | None = None,
+        assets: Mapping[str, Asset] | None = None,
     ) -> NoulResult:
         """Evaluate Noul through the native async SDK client."""
-        response = await self._client.system_one(
+        response = await self._system_one(
             state=state,
             questions={"answer": build_noul(question, true=true, false=false)},
             model=model,
+            assets=assets,
         )
         return _primitive_result(response, "answer", NoulDecision("answer", str(question), true, false, model))
 
@@ -325,13 +381,15 @@ class AsyncJev:
         state: Any,
         choices: Mapping[str, Any | None] | Sequence[str],
         model: str | None = None,
+        assets: Mapping[str, Asset] | None = None,
     ) -> ChoiceResult:
         """Evaluate Choice through the native async SDK client."""
         criteria = dict(choices) if isinstance(choices, Mapping) else {label: None for label in choices}
-        response = await self._client.system_one(
+        response = await self._system_one(
             state=state,
             questions={"answer": build_choice(question, criteria)},
             model=model,
+            assets=assets,
         )
         return _primitive_result(response, "answer", ChoiceDecision("answer", str(question), criteria))
 
@@ -342,13 +400,15 @@ class AsyncJev:
         state: Any,
         levels: Sequence[Any],
         model: str | None = None,
+        assets: Mapping[str, Asset] | None = None,
     ) -> ScoreResult:
         """Evaluate Score through the native async SDK client."""
         values = list(levels)
-        response = await self._client.system_one(
+        response = await self._system_one(
             state=state,
             questions={"answer": build_score(question, values)},
             model=model,
+            assets=assets,
         )
         return _primitive_result(response, "answer", ScoreDecision("answer", str(question), tuple(values)))
 
@@ -358,6 +418,7 @@ class AsyncJev:
         *,
         state: Any,
         model: str | None = None,
+        assets: Mapping[str, Asset] | None = None,
     ) -> NoulResult | ChoiceResult | ScoreResult | BundleResult:
         """Evaluate an in-memory decision using the native async SDK client.
 
@@ -367,7 +428,7 @@ class AsyncJev:
         validate_runtime_decision(decision)
         effective_model = model if model is not None else decision.model
         questions = build_decision_questions(decision)
-        response = await self._client.system_one(state=state, questions=questions, model=effective_model)
+        response = await self._system_one(state=state, questions=questions, model=effective_model, assets=assets)
         if isinstance(decision, BundleDecision):
             answers = {name: _primitive_result(response, name, child) for name, child in decision.questions.items()}
             return BundleResult(
@@ -386,10 +447,11 @@ class AsyncJev:
         state: Any,
         config: str | Path | None = None,
         model: str | None = None,
+        assets: Mapping[str, Asset] | None = None,
     ) -> NoulResult | ChoiceResult | ScoreResult | BundleResult:
         """Evaluate a named primitive or bundle asynchronously."""
         decision = load_decision(name, config)
-        return await self.evaluate(decision, state=state, model=model)
+        return await self.evaluate(decision, state=state, model=model, assets=assets)
 
     async def run(
         self,
@@ -397,9 +459,10 @@ class AsyncJev:
         state: Any,
         questions: Mapping[str, Question],
         model: str | None = None,
+        assets: Mapping[str, Asset] | None = None,
     ) -> dict[str, Any]:
         """Evaluate several SDK questions asynchronously in one request."""
-        response = await self._client.system_one(state=state, questions=questions, model=model)
+        response = await self._system_one(state=state, questions=questions, model=model, assets=assets)
         return response.model_dump(mode="json")
 
     async def models(self) -> list[dict[str, Any]]:

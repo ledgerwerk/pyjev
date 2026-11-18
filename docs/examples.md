@@ -49,3 +49,21 @@ The default threshold is a demo application policy, not a Jev correctness guaran
 `emoji_jev.py` is an interactive named-bundle example. A single request evaluates a 64-way emoji Choice plus tone questions. The terminal displays the selected emoji, top alternatives from the Choice probability distribution, typed side signals, request metadata, token usage, and client-observed round-trip time.
 
 The top-N display is deterministic Python over Jev's preserved probability distribution; it is not a second model call.
+
+## Image inspection
+
+`image_inspection.py` demonstrates an inline SDK `Image` in structured state and a pyjev Choice with the required experimental opt-in.
+
+```bash
+python examples/image_inspection.py path/to/photo.jpg
+```
+
+## Image comparison
+
+`image_compare.py` demonstrates a candidate image plus a named `assets=` reference for a Noul comparison. Its returned probability is a model judgment, not an identity or authorization guarantee.
+
+```bash
+python examples/image_compare.py path/to/candidate.jpg path/to/reference.jpg
+```
+
+Both examples send the supplied images to the configured TypeSafe-compatible API and require credentials. See [Image inputs](images.md) for details.

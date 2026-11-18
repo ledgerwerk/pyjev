@@ -24,7 +24,7 @@ classifiers = [
   "Topic :: Software Development :: Libraries :: Python Modules",
 ]
 dependencies = [
-  "typesafe-sdk>=0.7.0,<1",
+  "typesafe-sdk>=0.7.5,<1",
   "typer>=0.16,<1",
   "keyring>=25,<26",
   "tomli>=2; python_version < '3.11'",

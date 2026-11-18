@@ -87,3 +87,7 @@ it performs one request and returns safe metadata only.
 
 These are pyjev-specific codes and must not be assumed to match another `jev`
 CLI. Never retry a low-confidence result as if it were a transport error.
+
+## Experimental image inputs
+
+Use the official SDK `Image` through pyjev's Python API with explicit `Jev(images=True)` or `AsyncJev(images=True)`. This feature is experimental upstream; named references use `assets=`. Do not invent image/base64 serialization or multipart transport. Let `typesafe-sdk` own asset handling and follow the project's data policy for image content.

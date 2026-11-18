@@ -70,6 +70,7 @@ getting-started
 concepts
 recipes
 python-api
+images
 cli
 named-decisions
 patterns
@@ -88,6 +89,7 @@ changelog
 - [Named decisions](named-decisions.md)
 - [Decision patterns](patterns.md)
 - [Python API](python-api.md)
+- [Image inputs](images.md)
 - [Semantic recipes](recipes.md)
 - [CLI and exit codes](cli.md)
 - [Confidence policy](confidence.md)

@@ -111,6 +111,24 @@ async with AsyncJev() as jev:
     result = await jev.decide("ticket-route", state="Stripe webhooks fail")
 ```
 
+## Image inputs
+
+The Python API can pass an SDK `Image` through to TypeSafe. This feature is experimental and requires an explicit opt-in:
+
+```python
+from pathlib import Path
+
+from pyjev import Image, Jev
+
+with Jev(images=True) as jev:
+    result = jev.noul(
+        "Is a person visible in `photo`?",
+        state={"photo": Image(Path("photo.jpg"))},
+    )
+```
+
+Image requests require `typesafe-sdk>=0.7.5` and send the image to the configured API. See [Image inputs](images.md) for named assets, current upstream limits, and data-handling guidance.
+
 ## When to use a direct primitive
 
 Use `jev.choice(...)`, `jev.noul(...)`, or `jev.score(...)` when criteria are

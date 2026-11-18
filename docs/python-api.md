@@ -51,6 +51,28 @@ result = jev.decide("ticket-route", state=ticket, config="ops/.pyjev.toml")
 Explicit call model overrides the decision model. Configuration discovery and schema
 rules are described in [Named decisions](named-decisions.md).
 
+## Image inputs (experimental)
+
+pyjev re-exports the official SDK `Image` class. Image support requires `typesafe-sdk>=0.7.5` and explicit `images=True`; TypeSafe currently describes it as dreamer-ready and experimental. When enabled, pyjev sends the required image opt-in header on every System One request. Inline `Image` objects in state, instructions, and criteria are passed to the SDK unchanged.
+
+```python
+from pathlib import Path
+
+from pyjev import Image, Jev
+
+with Jev(images=True) as jev:
+    result = jev.choice(
+        "Which product matches <reference>?",
+        state={"candidate": Image(Path("candidate.jpg"))},
+        choices={"same": None, "different": None},
+        assets={"<reference>": Image(Path("reference.jpg"))},
+    )
+```
+
+`assets=` is available on `ask`, `noul`, `choice`, `score`, `evaluate`, `decide`, and `run`. `AsyncJev(images=True)` exposes the same behavior with native async calls and `await`. The flag also works with an injected SDK client; pyjev does not reconstruct or take ownership of that client.
+
+For advanced SDK operations such as `attach_assets`, use `jev.client`. Direct structured image placement and `assets=` are the preferred pyjev interfaces. Image support is experimental, and requests send the supplied image data to the configured API. See [Image inputs](images.md) for limits, preparation, errors, and policy considerations.
+
 ## Mixed questions
 
 `jev.run(state=..., questions=...)` sends several SDK question objects in one request.

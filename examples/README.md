@@ -15,6 +15,8 @@ python examples/semantic_linter.py pyjev/client.py
 python examples/semantic_linter.py pyjev --threshold 0.80
 python examples/semantic_linter.py pyjev/client.py --show-all
 python examples/semantic_linter.py pyjev/client.py --json
+python examples/image_inspection.py path/to/photo.jpg
+python examples/image_compare.py path/to/candidate.jpg path/to/reference.jpg
 ```
 
 Jev evaluates **state + a typed question** and returns structured data rather than
@@ -81,3 +83,7 @@ application logic in this example, not a Jev rule.
 The examples intentionally do not assert specific Jev outputs. Model results and
 confidence values may vary. The shared `.pyjev.toml` also contains named Noul and
 Choice declarations for CLI experiments.
+
+## Image inputs (experimental)
+
+`image_inspection.py` accepts one PNG or JPEG path and demonstrates an inline SDK `Image` in structured state. `image_compare.py` accepts candidate and reference paths and demonstrates a named `assets=` reference. Both examples explicitly opt in with `Jev(images=True)`. They send the supplied image data to the configured TypeSafe-compatible API, so they require API credentials and are not offline examples. A visual match is not authentication, identity proof, or authorization.

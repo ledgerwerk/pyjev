@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as package_version
 from pathlib import Path
 from typing import Any
+
+from typesafe_sdk import Asset, Image
 
 from .batch import BatchError, BatchRecord, BatchResult, BatchSummary, amap
 from .client import AsyncJev, Jev
@@ -31,10 +34,12 @@ def decide(
     config: str | Path | None = None,
     model: str | None = None,
     api_key: str | None = None,
+    images: bool = False,
+    assets: Mapping[str, Asset] | None = None,
 ) -> NoulResult | ChoiceResult | ScoreResult | BundleResult:
     """Evaluate a named decision using a short-lived convenience client."""
-    with Jev(api_key=api_key, model=model) as jev:
-        return jev.decide(name, state=state, config=config, model=model)
+    with Jev(api_key=api_key, model=model, images=images) as jev:
+        return jev.decide(name, state=state, config=config, model=model, assets=assets)
 
 
 __all__ = [
@@ -45,6 +50,7 @@ __all__ = [
     "BatchResult",
     "BatchSummary",
     "GateEvidence",
+    "Image",
     "Rejected",
     "OutputPathError",
     "format_json",

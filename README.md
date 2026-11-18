@@ -126,6 +126,24 @@ with Jev() as jev:
 print(result.value, result.confidence, result.probabilities)
 ```
 
+## Image inputs (experimental)
+
+TypeSafe currently labels image inputs dreamer-ready and requires explicit opt-in. pyjev forwards the official SDK `Image` object and leaves asset serialization and upload to `typesafe-sdk`:
+
+```python
+from pathlib import Path
+
+from pyjev import Image, Jev
+
+with Jev(images=True) as jev:
+    result = jev.noul(
+        "Is a person visible in `photo`?",
+        state={"photo": Image(Path("door-camera.jpg"))},
+    )
+```
+
+Images can be placed in state and structured questions. Pass named references with `assets={"<reference>": Image(...)}`. See [Image inputs](docs/images.md) for limits, examples, and experimental-status details.
+
 ## Confidence-aware automation
 
 Choice and Score can require an application-selected threshold:
@@ -186,6 +204,7 @@ pip install -e '.[dev,docs]'
 - [Getting started](docs/getting-started.md)
 - [Named decisions](docs/named-decisions.md)
 - [Python API](docs/python-api.md)
+- [Image inputs](docs/images.md)
 - [CLI and exit codes](docs/cli.md)
 - [Agent skill](docs/agent-skill.md)
 - [Runnable examples](examples/README.md)

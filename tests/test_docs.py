@@ -11,6 +11,7 @@ def test_documentation_tree_and_build_script_are_present() -> None:
         "getting-started.md",
         "concepts.md",
         "python-api.md",
+        "images.md",
         "cli.md",
         "named-decisions.md",
         "patterns.md",
@@ -56,3 +57,12 @@ def test_documentation_emphasizes_decision_contracts_and_boundaries() -> None:
     assert "## Rerank" in recipes
     assert "## Screen" in recipes and "security boundary" in recipes
     assert "support_triage.py" in examples
+
+
+def test_image_documentation_covers_opt_in_and_experimental_status() -> None:
+    images = (ROOT / "docs" / "images.md").read_text(encoding="utf-8")
+    index = (ROOT / "docs" / "index.md").read_text(encoding="utf-8")
+    assert "TypeSafe-Danger-Zone-Images" in images
+    assert "dreamer-ready" in images.lower()
+    assert "assets=" in images
+    assert "images" in index
