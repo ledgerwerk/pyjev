@@ -1,14 +1,85 @@
 # Comparisons
 
-## Three layers
+## pyjev and `typesafe-sdk`
 
-- `typesafe-sdk`: the official low-level Python SDK for TypeSafe models,
-  transport, retries, and API errors.
-- `pyjev`: a Python application layer with typed results, named `.pyjev.toml`
-  decisions, offline compilation, credentials, CLI behavior, and confidence
-  gates.
-- Other higher-level tools: may optimize for a different application, provider,
-  agent, or protocol workflow.
+pyjev depends on and delegates to TypeSafe's official Python SDK. They are not
+competing transports. Use the SDK to construct and execute System One requests.
+Use pyjev when those requests need application-level identity, offline inspection,
+reuse across runtime surfaces, explicit interpretation or policy, or packaged
+semantic workflows. See [Why pyjev?](why-pyjev.md) for the full product-boundary
+explanation.
+
+| Need                                                | `typesafe-sdk`                         | `pyjev`                                                              |
+| --------------------------------------------------- | -------------------------------------- | -------------------------------------------------------------------- |
+| Make a System One request                           | Yes, the primary API                   | Yes, delegates to the SDK                                            |
+| Sync and async clients                              | Yes                                    | Yes, with pyjev decision and recipe APIs                             |
+| Typed questions and answers                         | Yes, SDK models                        | Stable pyjev-facing result and workflow contracts around SDK results |
+| Low-level retry, transport, and request controls    | Yes                                    | Intentionally delegated to the SDK                                   |
+| Named project decisions                             | Build your own application abstraction | `.pyjev.toml` declarations                                           |
+| Offline decision validation and request preview     | Build your own tooling                 | `decision validate` and `compile_decision()`                         |
+| Deterministic decision-spec fingerprint             | Build your own                         | Yes                                                                  |
+| Reuse one named decision from Python and shell/CI   | Build your own                         | Yes                                                                  |
+| Shell-safe confidence gate and exit contract        | Build your own                         | Yes                                                                  |
+| Inspectable `build -> execute -> interpret` recipes | Cookbook or application code           | Yes                                                                  |
+| Bounded, ordered async batch records                | Build your own                         | `pyjev.amap`                                                         |
+| Latest or lower-level SDK features                  | Yes                                    | Use the SDK directly when pyjev does not expose them                 |
+
+> **Rule of thumb:** If the call is local implementation detail, the SDK is
+> usually enough. If the judgment has a stable name, is reviewed or reused, crosses
+> Python and shell/CI boundaries, or needs explicit interpretation and policy,
+> pyjev starts to pay for itself.
+
+## Architecture
+
+A named pyjev decision flows through a validated project declaration and back to
+the official SDK for execution:
+
+```text
+.pyjev.toml -> schema/discovery -> offline compile -> Jev/AsyncJev -> typesafe-sdk
+```
+
+The official SDK owns request and response models, transport, retries,
+authentication, assets, and API error semantics. pyjev adds declaration,
+validation, inspection, result normalization, local interpretation, and caller
+policy without becoming a second transport stack. The underlying client remains
+available through `jev.client`, and callers can inject an SDK client.
+
+## When to use the SDK directly
+
+Use `typesafe-sdk` directly when:
+
+- the application has only a few inline System One calls;
+- the questions are highly dynamic and do not benefit from a named project
+  contract;
+- shell/CI reuse or offline declaration validation is not needed;
+- no pyjev recipe matches the workflow;
+- the application already owns its policy, batch, and output layer;
+- low-level SDK controls are needed; or
+- a TypeSafe primitive is not currently exposed by pyjev.
+
+For example, the current pyjev decision model covers Noul, Choice, Score, and
+bundles of those primitives, not TypeSafe's `Box` primitive. The SDK also exposes
+lower-level request controls that pyjev intentionally does not mirror. Direct SDK
+use is an expected escape hatch, not a promise of complete SDK parity.
+
+## When pyjev pays for itself
+
+Use pyjev when a recurring judgment should be a stable, source-controlled
+contract that can be validated and inspected before execution, reused from
+Python and automation, or interpreted through explicit caller-owned policy.
+
+Its value is the operational pattern around SDK primitives:
+
+- named declarations and deterministic fingerprints;
+- credential-free validation and normalized request previews;
+- pyjev result wrappers that preserve uncertainty and response metadata;
+- reusable Python pipelines and CLI gate/output conventions;
+- semantic recipes with inspectable planning and deterministic interpretation;
+- bounded batch records for independent async work.
+
+These features do not claim that pyjev invented typed questions, async execution,
+confidence, or bundled requests. The value is a consistent application contract
+around those capabilities.
 
 ## pyjev and `jev-cli`
 
@@ -39,12 +110,16 @@ product.
 | Online credential check            | `auth status` reports local source; `auth test` checks the service | `auth test`                                                                                  |
 
 `jev-cli` retains rich response data where the provider supplies it. pyjev's
-result wrappers are a stable Python-facing contract; the distinction is not
-that `jev-cli` discards uncertainty.
+result wrappers are a stable Python-facing contract; the distinction is not that
+`jev-cli` discards uncertainty.
 
 ## pyjev and Nasrallah-AL/jev-cli
 
-This is a separate comparison from the `tumf/jev-cli` section above. It covers `Nasrallah-AL/jev-cli`, the TypeScript project distributed as npm package `jevctl` 0.2.3, executable `jev`, at main commit `a1e668164e75d7fc80cc4a51aaeb1d0144d8961f` (reviewed 2026-09-25). It is a dated snapshot, not a winner/loser ranking or a claim about future releases.
+This is a separate comparison from the `tumf/jev-cli` section above. It covers
+`Nasrallah-AL/jev-cli`, the TypeScript project distributed as npm package `jevctl`
+0.2.3, executable `jev`, at main commit
+`a1e668164e75d7fc80cc4a51aaeb1d0144d8961f` (reviewed 2026-09-25). It is a dated
+snapshot, not a winner/loser ranking or a claim about future releases.
 
 | Capability              | pyjev                                                                | Nasrallah `jev-cli`                                                           |
 | ----------------------- | -------------------------------------------------------------------- | ----------------------------------------------------------------------------- |
@@ -57,50 +132,11 @@ This is a separate comparison from the `tumf/jev-cli` section above. It covers `
 | Agent workflow          | Inspect-first skill and reusable Python API                          | Skill plus project-specific plugin/hooks                                      |
 | Transcript compaction   | Not in pyjev core                                                    | Agent-runtime-oriented compact operation                                      |
 
-The useful lesson is the semantic recipe layer and operational UX, not copying the external CLI's entire product boundary. pyjev keeps named contracts, offline inspection, typed uncertainty, explicit caller policy, and the official SDK transport boundary. Its recipes compose those foundations without invoking handlers or owning provider behavior.
-
-## Architecture
-
-A pyjev named decision flows through a validated repository declaration:
-
-```text
-.pyjev.toml -> schema/discovery -> offline compile -> Jev/AsyncJev -> typesafe-sdk
-```
-
-The official SDK owns transport, retries, request models, and API error
-semantics. pyjev adds declaration, validation, result normalization, lifecycle,
-credentials, and caller policy.
-
-The `jev-cli` baseline is closer to:
-
-```text
-CLI or MCP tool -> provider selection/translation -> HTTP endpoint -> JSON result
-```
-
-That makes it a strong direct shell, agent, MCP, and multi-provider client. It
-also means it owns provider request translation and compatibility behavior.
-
-## When to use which
-
-Use **pyjev** when you need:
-
-- an embeddable sync or async Python client;
-- dependency injection and caller-owned client lifecycle;
-- typed results with uncertainty and metadata preserved;
-- named decisions reviewed in source control;
-- credential-free validation or request previews;
-- explicit confidence policy at an automation boundary.
-
-Use **`jev-cli`** when you need:
-
-- a standalone generic shell client;
-- provider selection across the official service, gateways, or a custom endpoint;
-- an MCP server for an agent host;
-- its bundled agent-skill installation workflow;
-- JSON-first direct request tooling.
-
-For a one-off primitive shell judgment, either tool may fit. The syntax and
-output overlap there and should not be treated as the strategic distinction.
+The useful lesson is the semantic recipe layer and operational UX, not copying
+the external CLI's entire product boundary. pyjev keeps named contracts, offline
+inspection, typed uncertainty, explicit caller policy, and the official SDK
+transport boundary. Its recipes compose those foundations without invoking
+handlers or owning provider behavior.
 
 ## Exit codes are not interchangeable
 
@@ -113,14 +149,6 @@ pyjev's exit codes are its own automation contract:
 |    2 | Usage or local validation error                                    |
 |    3 | Valid Choice/Score result, but the caller's confidence gate failed |
 
-In particular, pyjev exit code `3` means a policy gate failed after Jev returned a
-valid result. It does **not** mean the API rejected authentication. Do not use
+In particular, pyjev exit code `3` means a policy gate failed after Jev returned
+a valid result. It does **not** mean the API rejected authentication. Do not use
 these numbers as if they were interoperable with another `jev` CLI's taxonomy.
-
-## Why not use the SDK directly?
-
-Use `typesafe-sdk` directly when you want maximum control and do not need named
-decisions, pyjev credential ergonomics, shell-safe confidence gates, offline
-inspection, or pyjev result wrappers. Use pyjev when those application and
-workflow abstractions make decisions easier to declare, inspect, validate,
-execute, gate, trace, and reuse.

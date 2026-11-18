@@ -1,12 +1,9 @@
 # pyjev
 
 **Reusable, inspectable Jev decision contracts for Python applications and automation.**
+`typesafe-sdk` is the execution layer for TypeSafe System One requests. `pyjev` is for decisions that become part of an application's operating contract: named declarations, offline inspection, reusable interpretation and policy, semantic recipes, and consistent Python/shell/CI behavior.
 
-`pyjev` is the Python application layer above TypeSafe's official
-`typesafe-sdk`. It adds typed synchronous and native asynchronous clients,
-version-controlled `.pyjev.toml` decision contracts, offline validation and
-compilation, uncertainty-preserving results, credential ergonomics, and
-confidence-aware application policy.
+If you only need a few inline Jev calls, start with `typesafe-sdk`. Use pyjev when the judgment itself needs to be named, reviewed, reused, tested, or safely automated.
 
 ## Why pyjev?
 
@@ -67,6 +64,7 @@ abstraction.
 :hidden:
 
 getting-started
+why-pyjev
 concepts
 recipes
 python-api
@@ -86,6 +84,7 @@ changelog
 ```
 
 - [Getting started](getting-started.md)
+- [Why pyjev?](why-pyjev.md)
 - [Named decisions](named-decisions.md)
 - [Decision patterns](patterns.md)
 - [Python API](python-api.md)

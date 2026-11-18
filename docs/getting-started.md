@@ -37,6 +37,8 @@ sales = "Purchasing, pricing, or procurement question"
 This is a version-controlled specification. It is not a secret store and must
 not contain API keys.
 
+The SDK can express this Choice directly in Python. The reason to declare it here is not syntax: `ticket-route` now has project-level identity. pyjev can validate and fingerprint it without credentials, then execute the same declaration from Python or shell automation. See [Why pyjev?](why-pyjev.md) for when this contract layer is useful and when a direct SDK call is simpler.
+
 ## Inspect before execution
 
 Validation and compilation are local operations:
@@ -50,6 +52,8 @@ pyjev decision compile ticket-route --state "Stripe webhooks fail"
 They do not read credentials, construct a client, or contact the Jev API. The
 compiled output is a normalized request preview with a stable schema marker and
 non-secret decision fingerprint.
+
+The fingerprint is useful for review, snapshots, distinguishing specification changes from runtime state, and automation evidence. It is not tamper-proofing or a persisted audit log.
 
 ## Authenticate
 
@@ -136,5 +140,5 @@ computed dynamically from deterministic application state. Keep deterministic
 constraints in normal Python; use a named decision when the judgment contract
 is stable and worth reviewing in source control.
 
-Continue with [Named decisions](named-decisions.md), [Confidence](confidence.md),
+For the product boundary and direct-SDK guidance, see [Why pyjev](why-pyjev.md). Continue with [Named decisions](named-decisions.md), [Confidence](confidence.md),
 [Authentication](authentication.md), and [Python API](python-api.md).

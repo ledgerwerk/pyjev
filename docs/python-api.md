@@ -12,6 +12,8 @@ with Jev(model="jev-latest") as jev:
 `Jev` delegates transport, retries, API semantics, and models to `typesafe-sdk`.
 The context manager closes clients created by `Jev`.
 
+`Jev` is not intended to hide `typesafe-sdk`. For a one-off low-level request, the SDK may be the simpler API. `Jev` becomes useful when you want named decisions, stable result wrappers, recipes, policy stages, or cross-surface conventions. The underlying SDK client remains available as `jev.client`. See [Why pyjev?](why-pyjev.md).
+
 ## Primitive operations
 
 - `jev.noul(...)` and its `jev.ask(...)` alias return `NoulResult`.
@@ -110,6 +112,10 @@ jev.close()  # does not close caller-owned client
 
 An injected client is caller-owned. Constructor options such as `api_key`, `model`, and
 `timeout` cannot be combined with it.
+
+## Dropping down to the SDK
+
+Use `jev.client` for SDK operations outside pyjev's higher-level surface, or inject your own SDK client when you need to control its construction and lifecycle. This preserves the SDK as the low-level request and transport boundary; pyjev does not mirror every SDK option. See [TypeSafe SDK comparisons](comparisons.md#pyjev-and-typesafe-sdk).
 
 ## Result objects
 

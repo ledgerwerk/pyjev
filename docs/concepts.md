@@ -47,12 +47,18 @@ production systems: deterministic constraints first, ambiguous judgment second.
 
 ## Product boundary
 
+## Product boundary
+
 ```text
-application / shell / CI
-        pyjev: decisions, confidence-aware output, CLI, credentials, validation
-        typesafe-sdk: models, transport, retries, API errors
-        Jev API
+application effects / policy
+        ↑
+pyjev: decision identity, reusable recipes, local interpretation/gates,
+      output/batch conventions, offline validation/compilation
+        ↑
+typesafe-sdk: request/response models, sync/async clients, assets,
+              retries, transport, authentication, API errors
+        ↑
+TypeSafe System One API / Jev
 ```
 
-pyjev wraps and preserves TypeSafe/Jev semantics; it does not invent probabilities or
-confidence calculations.
+The key design boundary is that pyjev should make judgments easier to declare, inspect, test, and operationalize without becoming another model API or side-effect framework. TypeSafe and Jev provide the model semantics; the official SDK owns request execution and transport. pyjev adds application-level contracts and workflows around those capabilities. If you only need a few inline requests or low-level SDK controls, use the SDK directly. See [Why pyjev?](why-pyjev.md).

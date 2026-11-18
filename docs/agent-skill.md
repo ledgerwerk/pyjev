@@ -1,8 +1,11 @@
 # Agent skill
 
+Use `typesafe-sdk` directly for isolated or low-level System One requests that do not need pyjev's contract, recipe, policy, or automation layers. Prefer pyjev when a judgment has a stable project-level name, must be inspected or validated without execution, should be shared across Python and shell/CI, a recipe encodes the desired semantics, or explicit local review policy matters. pyjev does not replace SDK transport features.
 The bundled pyjev skill at `skills/pyjev/SKILL.md` teaches an agent to use
 named decision contracts without reading pyjev source or adding an MCP
 integration.
+
+See [Why pyjev?](why-pyjev.md) for the product boundary and when direct SDK use is simpler.
 
 Its workflow is deliberately inspect-first:
 

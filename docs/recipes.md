@@ -4,6 +4,8 @@ Semantic recipes package typed pyjev decisions with deterministic input preparat
 
 Thresholds and actions are caller policy. The examples below use illustrative defaults, not universal correctness thresholds. Calibrate against representative local data and account for the consequences of each action.
 
+The SDK supplies the primitives used by these recipes. pyjev's contribution is the reusable application pattern around them: deterministic planning, explicit abstention/review semantics, bounded call shapes, typed evidence retention, and deterministic interpretation that can be tested separately from the network call.
+
 ## Find: rank and independently test applicability
 
 Use `find` to rank candidate documents or records while separately asking whether any candidate actually answers the query. The Choice ranking alone always has a winner, so it must not be treated as proof that a match exists.

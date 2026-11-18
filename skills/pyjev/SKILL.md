@@ -5,6 +5,17 @@ description: Inspect, validate, compile, and safely execute named pyjev decision
 
 # pyjev agent workflow
 
+Use `typesafe-sdk` directly for isolated or low-level System One requests that do not need pyjev's contract, recipe, policy, or automation layers.
+
+Prefer pyjev when:
+
+- the decision has a stable project-level name;
+- it must be inspected or validated without execution;
+- Python and shell/CI should share the same decision;
+- a pyjev recipe encodes the desired semantics;
+- explicit local policy and review states are important.
+
+Do not reimplement SDK transport, retry, authentication, asset, or API-error behavior in pyjev. The official SDK owns those boundaries.
 Use this skill when a project contains `.pyjev.toml` or asks an agent to use
 pyjev. Prefer the named-decision contract over re-spelling stable criteria in a
 prompt or one-off command.
