@@ -1,0 +1,1111 @@
+ README.md                    |  19 ++++
+ docs/examples.md             |  18 +++
+ docs/getting-started.md      |  18 +++
+ docs/images.md               | 169 +++++++++++++++++++++++++++++
+ docs/index.md                |   2 +
+ docs/python-api.md           |  22 ++++
+ examples/README.md           |   6 +
+ examples/image_compare.py    |  38 +++++++
+ examples/image_inspection.py |  39 +++++++
+ pyjev/__init__.py            |  10 +-
+ pyjev/client.py              |  97 ++++++++++++++---
+ pyproject.toml               |   2 +-
+ skills/pyjev/SKILL.md        |   4 +
+ tests/test_docs.py           |  10 ++
+ tests/test_images.py         | 253 +++++++++++++++++++++++++++++++++++++++++++
+ 15 files changed, 687 insertions(+), 20 deletions(-)
+
+diff --git a/README.md b/README.md
+index 31fb052..debc61a 100644
+--- a/README.md
++++ b/README.md
+@@ -126,6 +126,24 @@ with Jev() as jev:
+ print(result.value, result.confidence, result.probabilities)
+ ```
+
++## Image inputs (experimental)
++
++TypeSafe currently labels image inputs dreamer-ready and requires explicit opt-in. pyjev forwards the official SDK `Image` object and leaves asset serialization and upload to `typesafe-sdk`:
++
++```python
++from pathlib import Path
++
++from pyjev import Image, Jev
++
++with Jev(images=True) as jev:
++    result = jev.noul(
++        "Is a person visible in `photo`?",
++        state={"photo": Image(Path("door-camera.jpg"))},
++    )
++```
++
++Images can be placed in state and structured questions. Pass named references with `assets={"<reference>": Image(...)}`. See [Image inputs](docs/images.md) for limits, examples, and experimental-status details.
++
+ ## Confidence-aware automation
+
+ Choice and Score can require an application-selected threshold:
+@@ -186,6 +204,7 @@ pip install -e '.[dev,docs]'
+ - [Getting started](docs/getting-started.md)
+ - [Named decisions](docs/named-decisions.md)
+ - [Python API](docs/python-api.md)
++- [Image inputs](docs/images.md)
+ - [CLI and exit codes](docs/cli.md)
+ - [Agent skill](docs/agent-skill.md)
+ - [Runnable examples](examples/README.md)
+diff --git a/docs/examples.md b/docs/examples.md
+index b8c98c0..8604f6e 100644
+--- a/docs/examples.md
++++ b/docs/examples.md
+@@ -49,3 +49,21 @@ The default threshold is a demo application policy, not a Jev correctness guaran
+ `emoji_jev.py` is an interactive named-bundle example. A single request evaluates a 64-way emoji Choice plus tone questions. The terminal displays the selected emoji, top alternatives from the Choice probability distribution, typed side signals, request metadata, token usage, and client-observed round-trip time.
+
+ The top-N display is deterministic Python over Jev's preserved probability distribution; it is not a second model call.
++
++## Image inspection
++
++`image_inspection.py` demonstrates an inline SDK `Image` in structured state and a pyjev Choice with the required experimental opt-in.
++
++```bash
++python examples/image_inspection.py path/to/photo.jpg
++```
++
++## Image comparison
++
++`image_compare.py` demonstrates a candidate image plus a named `assets=` reference for a Noul comparison. Its returned probability is a model judgment, not an identity or authorization guarantee.
++
++```bash
++python examples/image_compare.py path/to/candidate.jpg path/to/reference.jpg
++```
++
++Both examples send the supplied images to the configured TypeSafe-compatible API and require credentials. See [Image inputs](images.md) for details.
+diff --git a/docs/getting-started.md b/docs/getting-started.md
+index a2e62c3..3f8b32b 100644
+--- a/docs/getting-started.md
++++ b/docs/getting-started.md
+@@ -111,6 +111,24 @@ async with AsyncJev() as jev:
+     result = await jev.decide("ticket-route", state="Stripe webhooks fail")
+ ```
+
++## Image inputs
++
++The Python API can pass an SDK `Image` through to TypeSafe. This feature is experimental and requires an explicit opt-in:
++
++```python
++from pathlib import Path
++
++from pyjev import Image, Jev
++
++with Jev(images=True) as jev:
++    result = jev.noul(
++        "Is a person visible in `photo`?",
++        state={"photo": Image(Path("photo.jpg"))},
++    )
++```
++
++Image requests require `typesafe-sdk>=0.7.5` and send the image to the configured API. See [Image inputs](images.md) for named assets, current upstream limits, and data-handling guidance.
++
+ ## When to use a direct primitive
+
+ Use `jev.choice(...)`, `jev.noul(...)`, or `jev.score(...)` when criteria are
+diff --git a/docs/images.md b/docs/images.md
+new file mode 100644
+index 0000000..9905f29
+--- /dev/null
++++ b/docs/images.md
+@@ -0,0 +1,169 @@
++# Image inputs
++
++## Experimental status
++
++Image inputs are currently a dreamer-ready, experimental TypeSafe feature. They require explicit opt-in with `images=True`; request, answer, and limit behavior may change upstream. Do not treat this feature as production-ready. pyjev re-exports the SDK's `Image` object and forwards image requests. The official `typesafe-sdk` owns asset references, serialization, uploads, and transport.
++
++If `images=True` is omitted, an image-bearing request may be rejected by the API. pyjev does not automatically enable the feature when it encounters an `Image` object.
++
++## Installation and image construction
++
++Image support requires `typesafe-sdk>=0.7.5`. Passing a path or bytes does not require an optional dependency:
++
++```python
++from pathlib import Path
++
++from pyjev import Image
++
++photo = Image(Path("photo.jpg"))
++```
++
++The SDK also provides `Image.from_base64(...)`. `Image.from_pil(...)` is available when Pillow is installed through the optional SDK extra:
++
++```bash
++pip install 'typesafe-sdk[pil]>=0.7.5,<1'
++```
++
++Pillow is not a pyjev or base SDK dependency.
++
++## First image decision
++
++```python
++from pathlib import Path
++
++from pyjev import Image, Jev
++
++with Jev(images=True) as jev:
++    result = jev.noul(
++        "Is a person visible in `photo`?",
++        state={"photo": Image(Path("door-camera.jpg"))},
++    )
++
++print("probability true:", result.value)
++```
++
++`NoulResult.value` is the model's probability signal for true, not a correctness guarantee. Image requests send the explicit `TypeSafe-Danger-Zone-Images: true` opt-in header through the official SDK.
++
++## Where images can go
++
++Pass SDK `Image` objects directly in SDK-valid structured content. pyjev preserves them; it does not recursively rewrite content or read image bytes itself. Images can be placed in state, direct primitive instructions, Noul criteria, Choice criteria, and Score levels. For example:
++
++```python
++from pathlib import Path
++
++from pyjev import Image, Jev
++
++candidate = Image(Path("candidate.jpg"))
++red_reference = Image(Path("red.jpg"))
++blue_reference = Image(Path("blue.jpg"))
++
++with Jev(images=True) as jev:
++    result = jev.choice(
++        "Which reference example best matches `candidate`?",
++        state={"candidate": candidate},
++        choices={
++            "red": red_reference,
++            "blue": blue_reference,
++            "other": "Neither reference",
++        },
++    )
++```
++
++Use structured content rather than concatenating image representations into strings. When the same image is useful to several questions, place it once in state and refer to that state path to avoid repeated image input.
++
++## Named references with `assets=`
++
++Use named references when the question contains a stable textual placeholder, including for a named decision:
++
++```python
++from pathlib import Path
++
++from pyjev import Image, Jev
++
++with Jev(images=True) as jev:
++    result = jev.decide(
++        "returned-product",
++        state={"returned": Image(Path("returned.jpg"))},
++        assets={"<catalog-photo>": Image(Path("catalog.jpg"))},
++    )
++```
++
++The decision can remain portable text in `.pyjev.toml`:
++
++```toml
++[decision.returned-product]
++type = "noul"
++question = "Does the product in `returned` match <catalog-photo>?"
++```
++
++Supply the actual SDK `Image` in `assets=` at execution time. Do not place binary data or base64 image blobs in decision TOML. `assets=` is available on the sync and native async decision methods; see [Python API](python-api.md).
++
++## Text interpolation with `attach_assets`
++
++For advanced string interpolation, use the SDK client's `attach_assets` context manager. Direct structured placement is simpler and preferred:
++
++```python
++from pathlib import Path
++
++from pyjev import Image, Jev
++
++photo = Image(Path("photo.jpg"))
++
++with Jev(images=True) as jev:
++    with jev.client.attach_assets(photo):
++        result = jev.noul(
++            f"Is the product shown here damaged: {photo}?",
++            state="returned item",
++        )
++```
++
++The SDK's async client provides the same context-manager interface:
++
++```python
++from pathlib import Path
++
++from pyjev import AsyncJev, Image
++
++photo = Image(Path("photo.jpg"))
++
++async with AsyncJev(images=True) as jev:
++    with jev.client.attach_assets(photo):
++        result = await jev.noul(
++            f"Is the product shown here damaged: {photo}?",
++            state="returned item",
++        )
++```
++
++This is a low-level SDK feature exposed through `Jev.client`, not a separate pyjev asset registry.
++
++## Image preparation and limits
++
++The current TypeSafe image API accepts PNG and JPEG still images. Documented limits include:
++
++- at most 16 MiB per image;
++- each side between 280 and 1568 pixels;
++- total image area between 78,400 and 2,458,624 pixels;
++- a 32 MiB request-body limit and 32 MiB aggregate/expanded image limits.
++
++The API does not apply EXIF orientation. Prepare pixels upright before sending. These limits are upstream behavior and may change; pyjev does not duplicate them with its own validator. See the [TypeSafe image documentation](https://docs.typesafe.ai/images) for current requirements and errors.
++
++## Cost and repeated references
++
++Image input contributes to input tokens. Reusing a reference in several places can expand the model input each time. When multiple questions use the same image, place it once in state and refer to its state path where possible.
++
++## Named decisions and offline compilation
++
++`compile_decision(...)` remains an offline, JSON-like request preview. It does not read image files or preview multipart data. For image-backed named decisions, compile and inspect textual placeholders such as `<catalog-photo>`, then provide the actual `Image` through `assets=` only during execution. Runtime image objects are not part of the named-decision schema or its fingerprint.
++
++## Errors
++
++The upstream API may reject requests when image support was not enabled, when an image format or dimensions are invalid, a named asset is not referenced, or a request exceeds size limits. Let official SDK errors retain their status, request ID, and validation details. See the [TypeSafe image documentation](https://docs.typesafe.ai/images) for current error guidance.
++
++## Security and policy
++
++- Visual similarity is not authentication, identity proof, or authorization.
++- Confidence is a model signal, not the probability that an answer is correct.
++- Images may contain sensitive data and are sent to the configured TypeSafe-compatible API.
++- Apply the same data-handling and access policies used for other request content.
++
++This initial image integration is a Python API feature. pyjev's CLI does not add image path flags or image transport.
+diff --git a/docs/index.md b/docs/index.md
+index c5050bf..fd72a58 100644
+--- a/docs/index.md
++++ b/docs/index.md
+@@ -70,6 +70,7 @@ getting-started
+ concepts
+ recipes
+ python-api
++images
+ cli
+ named-decisions
+ patterns
+@@ -88,6 +89,7 @@ changelog
+ - [Named decisions](named-decisions.md)
+ - [Decision patterns](patterns.md)
+ - [Python API](python-api.md)
++- [Image inputs](images.md)
+ - [Semantic recipes](recipes.md)
+ - [CLI and exit codes](cli.md)
+ - [Confidence policy](confidence.md)
+diff --git a/docs/python-api.md b/docs/python-api.md
+index f1e6a78..70b34db 100644
+--- a/docs/python-api.md
++++ b/docs/python-api.md
+@@ -51,6 +51,28 @@ result = jev.decide("ticket-route", state=ticket, config="ops/.pyjev.toml")
+ Explicit call model overrides the decision model. Configuration discovery and schema
+ rules are described in [Named decisions](named-decisions.md).
+
++## Image inputs (experimental)
++
++pyjev re-exports the official SDK `Image` class. Image support requires `typesafe-sdk>=0.7.5` and explicit `images=True`; TypeSafe currently describes it as dreamer-ready and experimental. When enabled, pyjev sends the required image opt-in header on every System One request. Inline `Image` objects in state, instructions, and criteria are passed to the SDK unchanged.
++
++```python
++from pathlib import Path
++
++from pyjev import Image, Jev
++
++with Jev(images=True) as jev:
++    result = jev.choice(
++        "Which product matches <reference>?",
++        state={"candidate": Image(Path("candidate.jpg"))},
++        choices={"same": None, "different": None},
++        assets={"<reference>": Image(Path("reference.jpg"))},
++    )
++```
++
++`assets=` is available on `ask`, `noul`, `choice`, `score`, `evaluate`, `decide`, and `run`. `AsyncJev(images=True)` exposes the same behavior with native async calls and `await`. The flag also works with an injected SDK client; pyjev does not reconstruct or take ownership of that client.
++
++For advanced SDK operations such as `attach_assets`, use `jev.client`. Direct structured image placement and `assets=` are the preferred pyjev interfaces. Image support is experimental, and requests send the supplied image data to the configured API. See [Image inputs](images.md) for limits, preparation, errors, and policy considerations.
++
+ ## Mixed questions
+
+ `jev.run(state=..., questions=...)` sends several SDK question objects in one request.
+diff --git a/examples/README.md b/examples/README.md
+index 68ff8ce..d9cd991 100644
+--- a/examples/README.md
++++ b/examples/README.md
+@@ -15,6 +15,8 @@ python examples/semantic_linter.py pyjev/client.py
+ python examples/semantic_linter.py pyjev --threshold 0.80
+ python examples/semantic_linter.py pyjev/client.py --show-all
+ python examples/semantic_linter.py pyjev/client.py --json
++python examples/image_inspection.py path/to/photo.jpg
++python examples/image_compare.py path/to/candidate.jpg path/to/reference.jpg
+ ```
+
+ Jev evaluates **state + a typed question** and returns structured data rather than
+@@ -81,3 +83,7 @@ application logic in this example, not a Jev rule.
+ The examples intentionally do not assert specific Jev outputs. Model results and
+ confidence values may vary. The shared `.pyjev.toml` also contains named Noul and
+ Choice declarations for CLI experiments.
++
++## Image inputs (experimental)
++
++`image_inspection.py` accepts one PNG or JPEG path and demonstrates an inline SDK `Image` in structured state. `image_compare.py` accepts candidate and reference paths and demonstrates a named `assets=` reference. Both examples explicitly opt in with `Jev(images=True)`. They send the supplied image data to the configured TypeSafe-compatible API, so they require API credentials and are not offline examples. A visual match is not authentication, identity proof, or authorization.
+diff --git a/examples/image_compare.py b/examples/image_compare.py
+new file mode 100644
+index 0000000..6474378
+--- /dev/null
++++ b/examples/image_compare.py
+@@ -0,0 +1,38 @@
++"""Compare a candidate image with a caller-supplied named reference image."""
++
++from __future__ import annotations
++
++import argparse
++from pathlib import Path
++
++from pyjev import Image, Jev
++
++
++def parse_args() -> argparse.Namespace:
++    parser = argparse.ArgumentParser(description=__doc__)
++    parser.add_argument("candidate", type=Path, help="path to a candidate PNG or JPEG image")
++    parser.add_argument("reference", type=Path, help="path to a reference PNG or JPEG image")
++    return parser.parse_args()
++
++
++def main() -> None:
++    args = parse_args()
++    candidate = Image(args.candidate)
++    reference = Image(args.reference)
++
++    with Jev(images=True) as jev:
++        result = jev.noul(
++            "Does the object in `candidate` visually match <reference>?",
++            state={"candidate": candidate},
++            true="The visible object is consistent with the reference image.",
++            false="The visible object differs materially from the reference image.",
++            assets={"<reference>": reference},
++        )
++
++    print("probability true:", result.value)
++    print("request_id:", result.request_id)
++    print("A visual match is not authentication, identity proof, or authorization.")
++
++
++if __name__ == "__main__":
++    main()
+diff --git a/examples/image_inspection.py b/examples/image_inspection.py
+new file mode 100644
+index 0000000..44128c1
+--- /dev/null
++++ b/examples/image_inspection.py
+@@ -0,0 +1,39 @@
++"""Classify the primary subject in a caller-supplied image."""
++
++from __future__ import annotations
++
++import argparse
++from pathlib import Path
++
++from pyjev import Image, Jev
++
++
++def parse_args() -> argparse.Namespace:
++    parser = argparse.ArgumentParser(description=__doc__)
++    parser.add_argument("image", type=Path, help="path to a PNG or JPEG image")
++    return parser.parse_args()
++
++
++def main() -> None:
++    args = parse_args()
++
++    with Jev(images=True) as jev:
++        result = jev.choice(
++            "Which category best describes `photo`?",
++            state={"photo": Image(args.image)},
++            choices={
++                "person": "A person is the primary subject.",
++                "package": "A parcel, box, or package is the primary subject.",
++                "vehicle": "A vehicle is the primary subject.",
++                "other": "None of the above.",
++            },
++        )
++
++    print("choice:", result.value)
++    print("confidence:", result.confidence)
++    print("probabilities:", result.probabilities)
++    print("These categories are an example, not an exhaustive real-world policy.")
++
++
++if __name__ == "__main__":
++    main()
+diff --git a/pyjev/__init__.py b/pyjev/__init__.py
+index c49cb0c..d71c95e 100644
+--- a/pyjev/__init__.py
++++ b/pyjev/__init__.py
+@@ -2,11 +2,14 @@
+
+ from __future__ import annotations
+
++from collections.abc import Mapping
+ from importlib.metadata import PackageNotFoundError
+ from importlib.metadata import version as package_version
+ from pathlib import Path
+ from typing import Any
+
++from typesafe_sdk import Asset, Image
++
+ from .batch import BatchError, BatchRecord, BatchResult, BatchSummary, amap
+ from .client import AsyncJev, Jev
+ from .compile import CompiledDecision, compile_decision
+@@ -31,10 +34,12 @@ def decide(
+     config: str | Path | None = None,
+     model: str | None = None,
+     api_key: str | None = None,
++    images: bool = False,
++    assets: Mapping[str, Asset] | None = None,
+ ) -> NoulResult | ChoiceResult | ScoreResult | BundleResult:
+     """Evaluate a named decision using a short-lived convenience client."""
+-    with Jev(api_key=api_key, model=model) as jev:
+-        return jev.decide(name, state=state, config=config, model=model)
++    with Jev(api_key=api_key, model=model, images=images) as jev:
++        return jev.decide(name, state=state, config=config, model=model, assets=assets)
+
+
+ __all__ = [
+@@ -45,6 +50,7 @@ __all__ = [
+     "BatchResult",
+     "BatchSummary",
+     "GateEvidence",
++    "Image",
+     "Rejected",
+     "OutputPathError",
+     "format_json",
+diff --git a/pyjev/client.py b/pyjev/client.py
+index 294fb89..397055c 100644
+--- a/pyjev/client.py
++++ b/pyjev/client.py
+@@ -7,13 +7,15 @@ from pathlib import Path
+ from types import TracebackType
+ from typing import Any, overload
+
+-from typesafe_sdk import AsyncTypeSafeClient, Question, TypeSafeClient
++from typesafe_sdk import Asset, AsyncTypeSafeClient, Question, TypeSafeClient
+
+ from .compile import build_choice, build_decision_questions, build_noul, build_score, validate_runtime_decision
+ from .credentials import get_api_key
+ from .decisions import BundleDecision, ChoiceDecision, Decision, NoulDecision, ScoreDecision, load_decision
+ from .results import BundleResult, ChoiceResult, NoulResult, PrimitiveResult, ScoreResult
+
++_IMAGE_HEADERS = {"TypeSafe-Danger-Zone-Images": "true"}
++
+
+ def _request_id(response: Any) -> str | None:
+     """Read the SDK's public request-id property when a response has one."""
+@@ -88,6 +90,7 @@ class Jev:
+         api_key: str | None = None,
+         model: str | None = None,
+         timeout: float | None = None,
++        images: bool = False,
+         client: TypeSafeClient | None = None,
+     ) -> None:
+         """Create a client or wrap a caller-owned SDK client.
+@@ -98,10 +101,26 @@ class Jev:
+         if client is not None and any(value is not None for value in (api_key, model, timeout)):
+             raise ValueError("api_key, model, and timeout cannot be used with an injected client")
+         self._owns_client = client is None
++        self._images = images
+         self._client = (
+             client if client is not None else TypeSafeClient(api_key=get_api_key(api_key), model=model, timeout=timeout)
+         )
+
++    def _system_one(
++        self,
++        *,
++        state: Any,
++        questions: Mapping[str, Question],
++        model: str | None,
++        assets: Mapping[str, Asset] | None = None,
++    ) -> Any:
++        kwargs: dict[str, Any] = {"state": state, "questions": questions, "model": model}
++        if assets is not None:
++            kwargs["assets"] = assets
++        if self._images:
++            kwargs["extra_headers"] = _IMAGE_HEADERS
++        return self._client.system_one(**kwargs)
++
+     @property
+     def client(self) -> TypeSafeClient:
+         """Return the underlying SDK client."""
+@@ -115,9 +134,10 @@ class Jev:
+         true: Any | None = None,
+         false: Any | None = None,
+         model: str | None = None,
++        assets: Mapping[str, Asset] | None = None,
+     ) -> NoulResult:
+         """Alias for :meth:`noul`."""
+-        return self.noul(question, state=state, true=true, false=false, model=model)
++        return self.noul(question, state=state, true=true, false=false, model=model, assets=assets)
+
+     def noul(
+         self,
+@@ -127,12 +147,14 @@ class Jev:
+         true: Any | None = None,
+         false: Any | None = None,
+         model: str | None = None,
++        assets: Mapping[str, Asset] | None = None,
+     ) -> NoulResult:
+         """Evaluate a yes/no question and preserve the probability of true."""
+-        response = self._client.system_one(
++        response = self._system_one(
+             state=state,
+             questions={"answer": build_noul(question, true=true, false=false)},
+             model=model,
++            assets=assets,
+         )
+         return _primitive_result(response, "answer", NoulDecision("answer", str(question), true, false, model))
+
+@@ -143,13 +165,15 @@ class Jev:
+         state: Any,
+         choices: Mapping[str, Any | None] | Sequence[str],
+         model: str | None = None,
++        assets: Mapping[str, Asset] | None = None,
+     ) -> ChoiceResult:
+         """Evaluate a closed-set Choice question."""
+         criteria = dict(choices) if isinstance(choices, Mapping) else {label: None for label in choices}
+-        response = self._client.system_one(
++        response = self._system_one(
+             state=state,
+             questions={"answer": build_choice(question, criteria)},
+             model=model,
++            assets=assets,
+         )
+         return _primitive_result(response, "answer", ChoiceDecision("answer", str(question), criteria))
+
+@@ -160,13 +184,15 @@ class Jev:
+         state: Any,
+         levels: Sequence[Any],
+         model: str | None = None,
++        assets: Mapping[str, Asset] | None = None,
+     ) -> ScoreResult:
+         """Evaluate state against an ordered Score rubric."""
+         values = list(levels)
+-        response = self._client.system_one(
++        response = self._system_one(
+             state=state,
+             questions={"answer": build_score(question, values)},
+             model=model,
++            assets=assets,
+         )
+         return _primitive_result(response, "answer", ScoreDecision("answer", str(question), tuple(values)))
+
+@@ -176,6 +202,7 @@ class Jev:
+         *,
+         state: Any,
+         model: str | None = None,
++        assets: Mapping[str, Asset] | None = None,
+     ) -> NoulResult | ChoiceResult | ScoreResult | BundleResult:
+         """Evaluate a validated in-memory typed decision declaration.
+
+@@ -187,7 +214,7 @@ class Jev:
+         validate_runtime_decision(decision)
+         effective_model = model if model is not None else decision.model
+         questions = build_decision_questions(decision)
+-        response = self._client.system_one(state=state, questions=questions, model=effective_model)
++        response = self._system_one(state=state, questions=questions, model=effective_model, assets=assets)
+         if isinstance(decision, BundleDecision):
+             answers = {name: _primitive_result(response, name, child) for name, child in decision.questions.items()}
+             return BundleResult(
+@@ -206,14 +233,22 @@ class Jev:
+         state: Any,
+         config: str | Path | None = None,
+         model: str | None = None,
++        assets: Mapping[str, Asset] | None = None,
+     ) -> NoulResult | ChoiceResult | ScoreResult | BundleResult:
+         """Evaluate a named primitive or bundle decision from TOML."""
+         decision = load_decision(name, config)
+-        return self.evaluate(decision, state=state, model=model)
++        return self.evaluate(decision, state=state, model=model, assets=assets)
+
+-    def _bundle(self, decision: BundleDecision, *, state: Any, model: str | None) -> BundleResult:
++    def _bundle(
++        self,
++        decision: BundleDecision,
++        *,
++        state: Any,
++        model: str | None,
++        assets: Mapping[str, Asset] | None = None,
++    ) -> BundleResult:
+         questions = build_decision_questions(decision)
+-        response = self._client.system_one(state=state, questions=questions, model=model)
++        response = self._system_one(state=state, questions=questions, model=model, assets=assets)
+         answers = {name: _primitive_result(response, name, child) for name, child in decision.questions.items()}
+         return BundleResult(
+             answers=answers,
+@@ -229,9 +264,10 @@ class Jev:
+         state: Any,
+         questions: Mapping[str, Question],
+         model: str | None = None,
++        assets: Mapping[str, Asset] | None = None,
+     ) -> dict[str, Any]:
+         """Evaluate several independent SDK questions in one request."""
+-        response = self._client.system_one(state=state, questions=questions, model=model)
++        response = self._system_one(state=state, questions=questions, model=model, assets=assets)
+         return response.model_dump(mode="json")
+
+     def models(self) -> list[dict[str, Any]]:
+@@ -272,18 +308,35 @@ class AsyncJev:
+         api_key: str | None = None,
+         model: str | None = None,
+         timeout: float | None = None,
++        images: bool = False,
+         client: AsyncTypeSafeClient | None = None,
+     ) -> None:
+         """Create an async client without simulating async over synchronous I/O."""
+         if client is not None and any(value is not None for value in (api_key, model, timeout)):
+             raise ValueError("api_key, model, and timeout cannot be used with an injected client")
+         self._owns_client = client is None
++        self._images = images
+         self._client = (
+             client
+             if client is not None
+             else AsyncTypeSafeClient(api_key=get_api_key(api_key), model=model, timeout=timeout)
+         )
+
++    async def _system_one(
++        self,
++        *,
++        state: Any,
++        questions: Mapping[str, Question],
++        model: str | None,
++        assets: Mapping[str, Asset] | None = None,
++    ) -> Any:
++        kwargs: dict[str, Any] = {"state": state, "questions": questions, "model": model}
++        if assets is not None:
++            kwargs["assets"] = assets
++        if self._images:
++            kwargs["extra_headers"] = _IMAGE_HEADERS
++        return await self._client.system_one(**kwargs)
++
+     @property
+     def client(self) -> AsyncTypeSafeClient:
+         """Return the underlying native async SDK client."""
+@@ -297,9 +350,10 @@ class AsyncJev:
+         true: Any | None = None,
+         false: Any | None = None,
+         model: str | None = None,
++        assets: Mapping[str, Asset] | None = None,
+     ) -> NoulResult:
+         """Async alias for :meth:`noul`."""
+-        return await self.noul(question, state=state, true=true, false=false, model=model)
++        return await self.noul(question, state=state, true=true, false=false, model=model, assets=assets)
+
+     async def noul(
+         self,
+@@ -309,12 +363,14 @@ class AsyncJev:
+         true: Any | None = None,
+         false: Any | None = None,
+         model: str | None = None,
++        assets: Mapping[str, Asset] | None = None,
+     ) -> NoulResult:
+         """Evaluate Noul through the native async SDK client."""
+-        response = await self._client.system_one(
++        response = await self._system_one(
+             state=state,
+             questions={"answer": build_noul(question, true=true, false=false)},
+             model=model,
++            assets=assets,
+         )
+         return _primitive_result(response, "answer", NoulDecision("answer", str(question), true, false, model))
+
+@@ -325,13 +381,15 @@ class AsyncJev:
+         state: Any,
+         choices: Mapping[str, Any | None] | Sequence[str],
+         model: str | None = None,
++        assets: Mapping[str, Asset] | None = None,
+     ) -> ChoiceResult:
+         """Evaluate Choice through the native async SDK client."""
+         criteria = dict(choices) if isinstance(choices, Mapping) else {label: None for label in choices}
+-        response = await self._client.system_one(
++        response = await self._system_one(
+             state=state,
+             questions={"answer": build_choice(question, criteria)},
+             model=model,
++            assets=assets,
+         )
+         return _primitive_result(response, "answer", ChoiceDecision("answer", str(question), criteria))
+
+@@ -342,13 +400,15 @@ class AsyncJev:
+         state: Any,
+         levels: Sequence[Any],
+         model: str | None = None,
++        assets: Mapping[str, Asset] | None = None,
+     ) -> ScoreResult:
+         """Evaluate Score through the native async SDK client."""
+         values = list(levels)
+-        response = await self._client.system_one(
++        response = await self._system_one(
+             state=state,
+             questions={"answer": build_score(question, values)},
+             model=model,
++            assets=assets,
+         )
+         return _primitive_result(response, "answer", ScoreDecision("answer", str(question), tuple(values)))
+
+@@ -358,6 +418,7 @@ class AsyncJev:
+         *,
+         state: Any,
+         model: str | None = None,
++        assets: Mapping[str, Asset] | None = None,
+     ) -> NoulResult | ChoiceResult | ScoreResult | BundleResult:
+         """Evaluate an in-memory decision using the native async SDK client.
+
+@@ -367,7 +428,7 @@ class AsyncJev:
+         validate_runtime_decision(decision)
+         effective_model = model if model is not None else decision.model
+         questions = build_decision_questions(decision)
+-        response = await self._client.system_one(state=state, questions=questions, model=effective_model)
++        response = await self._system_one(state=state, questions=questions, model=effective_model, assets=assets)
+         if isinstance(decision, BundleDecision):
+             answers = {name: _primitive_result(response, name, child) for name, child in decision.questions.items()}
+             return BundleResult(
+@@ -386,10 +447,11 @@ class AsyncJev:
+         state: Any,
+         config: str | Path | None = None,
+         model: str | None = None,
++        assets: Mapping[str, Asset] | None = None,
+     ) -> NoulResult | ChoiceResult | ScoreResult | BundleResult:
+         """Evaluate a named primitive or bundle asynchronously."""
+         decision = load_decision(name, config)
+-        return await self.evaluate(decision, state=state, model=model)
++        return await self.evaluate(decision, state=state, model=model, assets=assets)
+
+     async def run(
+         self,
+@@ -397,9 +459,10 @@ class AsyncJev:
+         state: Any,
+         questions: Mapping[str, Question],
+         model: str | None = None,
++        assets: Mapping[str, Asset] | None = None,
+     ) -> dict[str, Any]:
+         """Evaluate several SDK questions asynchronously in one request."""
+-        response = await self._client.system_one(state=state, questions=questions, model=model)
++        response = await self._system_one(state=state, questions=questions, model=model, assets=assets)
+         return response.model_dump(mode="json")
+
+     async def models(self) -> list[dict[str, Any]]:
+diff --git a/pyproject.toml b/pyproject.toml
+index d57611b..a927f5e 100644
+--- a/pyproject.toml
++++ b/pyproject.toml
+@@ -24,7 +24,7 @@ classifiers = [
+   "Topic :: Software Development :: Libraries :: Python Modules",
+ ]
+ dependencies = [
+-  "typesafe-sdk>=0.7.0,<1",
++  "typesafe-sdk>=0.7.5,<1",
+   "typer>=0.16,<1",
+   "keyring>=25,<26",
+   "tomli>=2; python_version < '3.11'",
+diff --git a/skills/pyjev/SKILL.md b/skills/pyjev/SKILL.md
+index 52c1164..daee7c8 100644
+--- a/skills/pyjev/SKILL.md
++++ b/skills/pyjev/SKILL.md
+@@ -87,3 +87,7 @@ it performs one request and returns safe metadata only.
+
+ These are pyjev-specific codes and must not be assumed to match another `jev`
+ CLI. Never retry a low-confidence result as if it were a transport error.
++
++## Experimental image inputs
++
++Use the official SDK `Image` through pyjev's Python API with explicit `Jev(images=True)` or `AsyncJev(images=True)`. This feature is experimental upstream; named references use `assets=`. Do not invent image/base64 serialization or multipart transport. Let `typesafe-sdk` own asset handling and follow the project's data policy for image content.
+diff --git a/tests/test_docs.py b/tests/test_docs.py
+index 88ae223..9ced176 100644
+--- a/tests/test_docs.py
++++ b/tests/test_docs.py
+@@ -11,6 +11,7 @@ def test_documentation_tree_and_build_script_are_present() -> None:
+         "getting-started.md",
+         "concepts.md",
+         "python-api.md",
++        "images.md",
+         "cli.md",
+         "named-decisions.md",
+         "patterns.md",
+@@ -56,3 +57,12 @@ def test_documentation_emphasizes_decision_contracts_and_boundaries() -> None:
+     assert "## Rerank" in recipes
+     assert "## Screen" in recipes and "security boundary" in recipes
+     assert "support_triage.py" in examples
++
++
++def test_image_documentation_covers_opt_in_and_experimental_status() -> None:
++    images = (ROOT / "docs" / "images.md").read_text(encoding="utf-8")
++    index = (ROOT / "docs" / "index.md").read_text(encoding="utf-8")
++    assert "TypeSafe-Danger-Zone-Images" in images
++    assert "dreamer-ready" in images.lower()
++    assert "assets=" in images
++    assert "images" in index
+diff --git a/tests/test_images.py b/tests/test_images.py
+new file mode 100644
+index 0000000..7059a00
+--- /dev/null
++++ b/tests/test_images.py
+@@ -0,0 +1,253 @@
++from __future__ import annotations
++
++from types import SimpleNamespace
++
++from typesafe_sdk import Image as SDKImage
++
++from pyjev import Image, decide
++
++
++def test_image_is_the_official_sdk_type() -> None:
++    assert Image is SDKImage
++
++
++def test_top_level_decide_forwards_image_options(monkeypatch) -> None:
++    assets = {"<reference>": Image(b"reference image bytes")}
++    image_state = {"photo": Image(b"photo image bytes")}
++    sentinel = object()
++    calls = {}
++
++    class FakeJev:
++        def __init__(self, **kwargs):
++            calls["init"] = kwargs
++
++        def __enter__(self):
++            return self
++
++        def __exit__(self, exc_type, exc_value, traceback):
++            return None
++
++        def decide(self, name, **kwargs):
++            calls["decide"] = (name, kwargs)
++            return sentinel
++
++    monkeypatch.setattr("pyjev.Jev", FakeJev)
++
++    result = decide("image-check", image_state, model="model", images=True, assets=assets)
++
++    assert result is sentinel
++    assert calls["init"] == {"api_key": None, "model": "model", "images": True}
++    assert calls["decide"] == (
++        "image-check",
++        {"state": image_state, "config": None, "model": "model", "assets": assets},
++    )
++
++
++class _Dumpable(SimpleNamespace):
++    def model_dump(self, mode="python"):
++        del mode
++        return dict(self.__dict__)
++
++
++class _ImageResponse:
++    model = "image-test"
++    request_id = "image-request"
++    usage = _Dumpable(input_tokens=10, output_tokens=2)
++    nouls = {"answer": _Dumpable(noul=0.91)}
++    choices = {
++        "answer": _Dumpable(
++            choice="person",
++            confidence=0.93,
++            probabilities={"person": 0.93, "other": 0.07},
++        )
++    }
++    scores = {
++        "answer": _Dumpable(
++            score=2.7,
++            confidence=0.88,
++            probabilities={0: 0.0, 1: 0.05, 2: 0.2, 3: 0.75},
++            legend={0: "low", 1: "normal", 2: "urgent", 3: "critical"},
++        )
++    }
++
++    def model_dump(self, mode="python"):
++        del mode
++        return {"model": self.model}
++
++
++class _SyncImageClient:
++    def __init__(self):
++        self.calls = []
++
++    def system_one(self, **kwargs):
++        self.calls.append(kwargs)
++        return _ImageResponse()
++
++
++class _AsyncImageClient:
++    def __init__(self):
++        self.calls = []
++
++    async def system_one(self, **kwargs):
++        self.calls.append(kwargs)
++        return _ImageResponse()
++
++
++def test_sync_inline_images_use_opt_in_header_and_preserve_result() -> None:
++    from pyjev import Jev
++
++    image = Image(b"photo bytes")
++    client = _SyncImageClient()
++    result = Jev(client=client, images=True).choice(
++        ["What is shown in `photo`?", image],
++        state={"photo": image},
++        choices={"person": image, "other": "Neither"},
++    )
++
++    call = client.calls[0]
++    question = call["questions"]["answer"]
++    assert call["state"]["photo"] is image
++    assert question.instructions[1] is image
++    assert question.criteria["person"] is image
++    assert call["extra_headers"] == {"TypeSafe-Danger-Zone-Images": "true"}
++    assert "assets" not in call
++    assert result.value == "person"
++    assert result.confidence == 0.93
++
++
++def test_sync_named_assets_are_forwarded_without_default_image_header() -> None:
++    from pyjev import Jev
++
++    candidate = Image(b"candidate bytes")
++    reference = Image(b"reference bytes")
++    assets = {"<reference>": reference}
++    client = _SyncImageClient()
++    result = Jev(client=client).noul(
++        "Does <reference> match `candidate`?",
++        state={"candidate": candidate},
++        assets=assets,
++    )
++
++    call = client.calls[0]
++    assert call["state"]["candidate"] is candidate
++    assert call["assets"] is assets
++    assert call["assets"]["<reference>"] is reference
++    assert "extra_headers" not in call
++    assert result.value == 0.91
++
++
++def test_async_inline_images_use_opt_in_header_and_preserve_result() -> None:
++    import asyncio
++
++    from pyjev import AsyncJev
++
++    async def run() -> None:
++        image = Image(b"photo bytes")
++        client = _AsyncImageClient()
++        result = await AsyncJev(client=client, images=True).choice(
++            ["What is shown in `photo`?", image],
++            state={"photo": image},
++            choices={"person": image, "other": "Neither"},
++        )
++
++        call = client.calls[0]
++        question = call["questions"]["answer"]
++        assert call["state"]["photo"] is image
++        assert question.instructions[1] is image
++        assert question.criteria["person"] is image
++        assert call["extra_headers"] == {"TypeSafe-Danger-Zone-Images": "true"}
++        assert "assets" not in call
++        assert result.value == "person"
++        assert result.confidence == 0.93
++
++    asyncio.run(run())
++
++
++def test_async_named_assets_are_forwarded_without_default_image_header() -> None:
++    import asyncio
++
++    from pyjev import AsyncJev
++
++    async def run() -> None:
++        candidate = Image(b"candidate bytes")
++        reference = Image(b"reference bytes")
++        assets = {"<reference>": reference}
++        client = _AsyncImageClient()
++        result = await AsyncJev(client=client).noul(
++            "Does <reference> match `candidate`?",
++            state={"candidate": candidate},
++            assets=assets,
++        )
++
++        call = client.calls[0]
++        assert call["state"]["candidate"] is candidate
++        assert call["assets"] is assets
++        assert call["assets"]["<reference>"] is reference
++        assert "extra_headers" not in call
++        assert result.value == 0.91
++
++    asyncio.run(run())
++
++
++def test_default_text_request_omits_image_options() -> None:
++    from pyjev import Jev
++
++    client = _SyncImageClient()
++    Jev(client=client).noul("Question?", state="text only")
++
++    assert set(client.calls[0]) == {"state", "questions", "model"}
++
++
++def test_sync_decision_methods_forward_named_assets(tmp_path) -> None:
++    from pyjev import Jev, NoulDecision
++
++    reference = Image(b"reference bytes")
++    assets = {"<reference>": reference}
++    client = _SyncImageClient()
++    jev = Jev(client=client)
++    jev.ask("Question?", state="state", assets=assets)
++    jev.noul("Question?", state="state", assets=assets)
++    jev.choice("Question?", state="state", choices=["person", "other"], assets=assets)
++    jev.score("Question?", state="state", levels=["low", "high"], assets=assets)
++    jev.evaluate(NoulDecision("inline", "Question?"), state="state", assets=assets)
++
++    config = tmp_path / ".pyjev.toml"
++    config.write_text("[decision.named]\ntype='noul'\nquestion='Question?'\n", encoding="utf-8")
++    jev.decide("named", state="state", config=config, assets=assets)
++    jev.run(state="state", questions={"answer": {"type": "noul", "instructions": "Question?"}}, assets=assets)
++
++    assert len(client.calls) == 7
++    assert all(call["assets"] is assets for call in client.calls)
++    assert all("extra_headers" not in call for call in client.calls)
++
++
++def test_async_decision_methods_forward_named_assets(tmp_path) -> None:
++    import asyncio
++
++    from pyjev import AsyncJev, NoulDecision
++
++    async def run() -> None:
++        reference = Image(b"reference bytes")
++        assets = {"<reference>": reference}
++        client = _AsyncImageClient()
++        jev = AsyncJev(client=client)
++        await jev.ask("Question?", state="state", assets=assets)
++        await jev.noul("Question?", state="state", assets=assets)
++        await jev.choice("Question?", state="state", choices=["person", "other"], assets=assets)
++        await jev.score("Question?", state="state", levels=["low", "high"], assets=assets)
++        await jev.evaluate(NoulDecision("inline", "Question?"), state="state", assets=assets)
++
++        config = tmp_path / ".pyjev.toml"
++        config.write_text("[decision.named]\ntype='noul'\nquestion='Question?'\n", encoding="utf-8")
++        await jev.decide("named", state="state", config=config, assets=assets)
++        await jev.run(
++            state="state",
++            questions={"answer": {"type": "noul", "instructions": "Question?"}},
++            assets=assets,
++        )
++
++        assert len(client.calls) == 7
++        assert all(call["assets"] is assets for call in client.calls)
++        assert all("extra_headers" not in call for call in client.calls)
++
++    asyncio.run(run())

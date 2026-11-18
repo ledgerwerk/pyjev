@@ -1,0 +1,26 @@
+rows:
+  - sha: 3054659aab89bbbcb9155c87c26148a669f31d3c
+    inspected: true
+    inspected_paths:
+      - README.md
+      - docs/examples.md
+      - docs/getting-started.md
+      - docs/images.md
+      - docs/index.md
+      - docs/python-api.md
+      - examples/README.md
+      - examples/image_compare.py
+      - examples/image_inspection.py
+      - pyjev/__init__.py
+      - pyjev/client.py
+      - pyproject.toml
+      - skills/pyjev/SKILL.md
+      - tests/test_docs.py
+      - tests/test_images.py
+    observed_behavior: Added experimental SDK image support to the Python API with explicit opt-in, named assets, sync and async forwarding, documentation, examples, and tests
+    public_impact: public
+    decision: accepted
+    target_entry_key: null
+    target_entry_id: null
+    notes: ""
+    stale: false

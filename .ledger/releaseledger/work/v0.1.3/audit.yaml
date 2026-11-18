@@ -1,0 +1,43 @@
+schema_version: 1
+object_type: commit_audit_sheet
+versioning:
+  schema_version: 1
+  revision: 1
+release_version: v0.1.3
+git_base_ref: v0.1.2
+git_base_sha: 1bf1b09753773aa6ac13276f3bfd97e2f46d7db8
+git_head_ref: HEAD
+git_head_sha: 3054659aab89bbbcb9155c87c26148a669f31d3c
+git_range: 1bf1b09753773aa6ac13276f3bfd97e2f46d7db8..3054659aab89bbbcb9155c87c26148a669f31d3c
+commit_count: 1
+rows:
+  - sha: 3054659aab89bbbcb9155c87c26148a669f31d3c
+    source_ref: git:3054659aab89bbbcb9155c87c26148a669f31d3c
+    short_sha: "3054659"
+    changed_paths:
+      - README.md
+      - docs/examples.md
+      - docs/getting-started.md
+      - docs/images.md
+      - docs/index.md
+      - docs/python-api.md
+      - examples/README.md
+      - examples/image_compare.py
+      - examples/image_inspection.py
+      - pyjev/__init__.py
+      - pyjev/client.py
+      - pyproject.toml
+      - skills/pyjev/SKILL.md
+      - tests/test_docs.py
+      - tests/test_images.py
+    stats:
+      files_changed: 15
+      insertions: 687
+      deletions: 20
+    inspected: false
+    inspected_paths: []
+    observed_behavior: ""
+    public_impact: unknown
+    decision: needs_review
+    stale: false
+    evidence_subject: "feat: add image support"
