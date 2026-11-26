@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 from types import SimpleNamespace
 
 from typer.testing import CliRunner
@@ -458,3 +459,95 @@ def test_run_supports_structured_pluck(monkeypatch):
     )
     assert result.exit_code == 0
     assert result.stdout.strip() == "billing"
+
+
+def test_structured_decision_show_and_compile_preserve_json_content(tmp_path: Path) -> None:
+    config = tmp_path / ".pyjev.toml"
+    config.write_text(
+        """[decision.route]
+type = "choice"
+question = { task = "Route", fields = ["subject", "body"] }
+
+[decision.route.options.billing]
+covers = ["refund"]
+
+[decision.route.options.engineering]
+covers = ["bug"]
+""",
+        encoding="utf-8",
+    )
+
+    shown = runner.invoke(app, ["decision", "show", "route", "--config", str(config)])
+    assert shown.exit_code == 0
+    assert 'question={"fields": ["subject", "body"], "task": "Route"}' in shown.stdout
+    assert "{'task':" not in shown.stdout
+
+    shown_json = runner.invoke(app, ["decision", "show", "route", "--config", str(config), "--json"])
+    assert json.loads(shown_json.stdout)["question"] == {"task": "Route", "fields": ["subject", "body"]}
+
+    compiled = runner.invoke(
+        app,
+        ["decision", "compile", "route", "--config", str(config), "--state", '{"subject":"refund"}', "--state-json"],
+    )
+    assert compiled.exit_code == 0
+    payload = json.loads(compiled.stdout)
+    assert payload["request"]["questions"]["answer"]["instructions"] == {
+        "task": "Route",
+        "fields": ["subject", "body"],
+    }
+
+
+def test_named_box_cli_rejects_before_client_construction(tmp_path: Path, monkeypatch) -> None:
+    config = tmp_path / ".pyjev.toml"
+    config.write_text(
+        """[decision.find-logo]
+type = "box"
+question = "the logo in photo"
+
+[decision.visual-inspection]
+type = "bundle"
+
+[decision.visual-inspection.questions.location]
+type = "box"
+question = "the logo in photo"
+""",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(cli, "Jev", lambda **kwargs: (_ for _ in ()).throw(AssertionError("client was constructed")))
+
+    for name in ("find-logo", "visual-inspection"):
+        result = runner.invoke(app, ["decide", name, "--config", str(config), "--state", "photo"])
+        assert result.exit_code == cli.EXIT_USAGE
+        assert "Python API" in result.output
+        assert "Jev(images=True)" in result.output
+        assert "image input" in result.output
+
+
+def test_raw_box_cli_request_rejects_before_client_construction(monkeypatch) -> None:
+    monkeypatch.setattr(cli, "Jev", lambda **kwargs: (_ for _ in ()).throw(AssertionError("client was constructed")))
+    result = runner.invoke(
+        app,
+        ["run"],
+        input='{"state":"photo","questions":{"location":{"type":"box","instructions":"the logo"}}}',
+    )
+    assert result.exit_code == cli.EXIT_USAGE
+    assert "Python API" in result.output
+    assert "Jev(images=True)" in result.output
+
+
+def test_text_structured_named_decision_remains_cli_executable(tmp_path: Path, monkeypatch) -> None:
+    config = tmp_path / ".pyjev.toml"
+    config.write_text(
+        '[decision.route]\ntype="choice"\nquestion={task="Route",fields=["subject","body"]}\n'
+        '[decision.route.options]\nbilling="Billing"\nengineering="Engineering"\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        cli,
+        "_run_api",
+        lambda action, *, model=None: FakeChoiceJev().choice(None, state=None, choices=None),
+    )
+
+    result = runner.invoke(app, ["decide", "route", "--config", str(config), "--state", "ticket"])
+    assert result.exit_code == 0
+    assert "choice=engineering" in result.stdout

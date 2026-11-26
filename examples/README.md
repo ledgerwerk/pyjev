@@ -15,6 +15,8 @@ python examples/semantic_linter.py pyjev/client.py
 python examples/semantic_linter.py pyjev --threshold 0.80
 python examples/semantic_linter.py pyjev/client.py --show-all
 python examples/semantic_linter.py pyjev/client.py --json
+python examples/structured_decisions.py
+python examples/image_localization.py path/to/photo.jpg
 python examples/image_inspection.py path/to/photo.jpg
 python examples/image_compare.py path/to/candidate.jpg path/to/reference.jpg
 ```
@@ -83,6 +85,22 @@ application logic in this example, not a Jev rule.
 The examples intentionally do not assert specific Jev outputs. Model results and
 confidence values may vary. The shared `.pyjev.toml` also contains named Noul and
 Choice declarations for CLI experiments.
+
+## Structured decisions
+
+`structured_decisions.py` runs a pure-text named bundle whose Noul question and criteria, Choice question and options, and Score rubric contain JSON/TOML objects. pyjev preserves the nested data as question structure rather than formatting it into prompt prose. The contract stays in schema 1 and thresholds remain application policy.
+
+```bash
+python examples/structured_decisions.py
+```
+
+## Box localization
+
+`image_localization.py` runs a named bundle containing Box and a companion Noul presence question. It prints normalized coordinates and optional pixel edges without cropping or writing files. Box and image support are experimental upstream, require `images=True`, and send the supplied image to the configured API. Box has no not-found result, and this example supplies no universal presence or confidence threshold.
+
+```bash
+python examples/image_localization.py path/to/photo.jpg --width 1920 --height 1080
+```
 
 ## Image inputs (experimental)
 

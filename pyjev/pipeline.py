@@ -6,7 +6,7 @@ import math
 from dataclasses import dataclass
 from typing import Any, Generic, Literal, TypeAlias, TypeVar
 
-from .results import BundleResult, ChoiceResult, NoulResult, PrimitiveResult, ScoreResult
+from .results import BoxResult, BundleResult, ChoiceResult, NoulResult, PrimitiveResult, ScoreResult
 
 InputT = TypeVar("InputT")
 OutputT = TypeVar("OutputT")
@@ -30,7 +30,7 @@ class GateEvidence:
     """The signal and threshold used by a local gate."""
 
     signal: Literal["confidence", "probability"]
-    observed: float
+    observed: float | None
     comparator: Literal["at_least", "at_most"]
     threshold: float
 
@@ -110,15 +110,15 @@ class AnswerStage(PipeStage[BundleResult, PrimitiveResult]):
 
 
 @dataclass(frozen=True, slots=True)
-class ConfidenceGateStage(PipeStage[ChoiceResult | ScoreResult, GateOutcome]):
-    """Gate a Choice or Score result using its Jev confidence signal."""
+class ConfidenceGateStage(PipeStage[ChoiceResult | ScoreResult | BoxResult, GateOutcome]):
+    """Gate a Choice, Score, or Box result using its Jev confidence signal."""
 
     minimum: float
 
-    def apply(self, value: ChoiceResult | ScoreResult) -> GateOutcome:
-        if not isinstance(value, (ChoiceResult, ScoreResult)):
+    def apply(self, value: ChoiceResult | ScoreResult | BoxResult) -> GateOutcome:
+        if not isinstance(value, (ChoiceResult, ScoreResult, BoxResult)):
             raise PipelineTypeError(
-                f"require_confidence expected ChoiceResult or ScoreResult, got {type(value).__name__}"
+                f"require_confidence expected ChoiceResult, ScoreResult, or BoxResult, got {type(value).__name__}"
             )
         gate = GateEvidence(
             signal="confidence",
@@ -126,6 +126,8 @@ class ConfidenceGateStage(PipeStage[ChoiceResult | ScoreResult, GateOutcome]):
             comparator="at_least",
             threshold=self.minimum,
         )
+        if value.confidence is None:
+            return Rejected(result=value, gate=gate)
         if value.confidence >= self.minimum:
             return Accepted(value=value.value, result=value, gate=gate)
         return Rejected(result=value, gate=gate)
@@ -169,7 +171,7 @@ def answer(name: str) -> AnswerStage:
 
 
 def require_confidence(minimum: float) -> ConfidenceGateStage:
-    """Create an inclusive confidence gate for Choice or Score results."""
+    """Create an inclusive confidence gate for Choice, Score, or Box results."""
     return ConfidenceGateStage(minimum=_validate_threshold(minimum, "confidence threshold"))
 
 

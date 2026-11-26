@@ -101,4 +101,12 @@ CLI. Never retry a low-confidence result as if it were a transport error.
 
 ## Experimental image inputs
 
-Use the official SDK `Image` through pyjev's Python API with explicit `Jev(images=True)` or `AsyncJev(images=True)`. This feature is experimental upstream; named references use `assets=`. Do not invent image/base64 serialization or multipart transport. Let `typesafe-sdk` own asset handling and follow the project's data policy for image content.
+## Structured question content
+
+Prefer objects and arrays when named fields, relationships, or an existing schema make the question clearer. Keep content structured in Python and named schema-1 contracts; do not serialize objects into prompt strings. pyjev uses the official SDK `Content` and `JSONContent` aliases. The SDK validates primitive schemas and owns serialization and transport. See `docs/structured-content.md` for supported fields and examples.
+
+## Experimental image inputs and Box
+
+Use the official SDK `Image` through pyjev's Python API with explicit `Jev(images=True)` or `AsyncJev(images=True)`. Box returns one set of coordinates and has no not-found outcome. Pair Box with a Noul in the same bundle when target presence matters, and choose thresholds in caller policy. Keep the Box result and confidence visible for review; do not invent a universal threshold.
+
+Named Box contracts can be inspected and compiled offline. The CLI does not upload images or execute live Box requests. Do not add image/base64 serialization or implement multipart transport. Let `typesafe-sdk` own question models, assets, serialization, and transport, and follow the project's policy for image content.

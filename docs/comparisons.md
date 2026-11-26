@@ -9,20 +9,21 @@ reuse across runtime surfaces, explicit interpretation or policy, or packaged
 semantic workflows. See [Why pyjev?](why-pyjev.md) for the full product-boundary
 explanation.
 
-| Need                                                | `typesafe-sdk`                         | `pyjev`                                                              |
-| --------------------------------------------------- | -------------------------------------- | -------------------------------------------------------------------- |
-| Make a System One request                           | Yes, the primary API                   | Yes, delegates to the SDK                                            |
-| Sync and async clients                              | Yes                                    | Yes, with pyjev decision and recipe APIs                             |
-| Typed questions and answers                         | Yes, SDK models                        | Stable pyjev-facing result and workflow contracts around SDK results |
-| Low-level retry, transport, and request controls    | Yes                                    | Intentionally delegated to the SDK                                   |
-| Named project decisions                             | Build your own application abstraction | `.pyjev.toml` declarations                                           |
-| Offline decision validation and request preview     | Build your own tooling                 | `decision validate` and `compile_decision()`                         |
-| Deterministic decision-spec fingerprint             | Build your own                         | Yes                                                                  |
-| Reuse one named decision from Python and shell/CI   | Build your own                         | Yes                                                                  |
-| Shell-safe confidence gate and exit contract        | Build your own                         | Yes                                                                  |
-| Inspectable `build -> execute -> interpret` recipes | Cookbook or application code           | Yes                                                                  |
-| Bounded, ordered async batch records                | Build your own                         | `pyjev.amap`                                                         |
-| Latest or lower-level SDK features                  | Yes                                    | Use the SDK directly when pyjev does not expose them                 |
+| Need                                                | `typesafe-sdk`                             | `pyjev`                                                              |
+| --------------------------------------------------- | ------------------------------------------ | -------------------------------------------------------------------- |
+| Make a System One request                           | Yes, the primary API                       | Yes, delegates to the SDK                                            |
+| Sync and async clients                              | Yes                                        | Yes, with pyjev decision and recipe APIs                             |
+| Box and structured content                          | Official question models and content types | Typed Box result and structured direct/named contracts               |
+| Typed questions and answers                         | Yes, SDK models                            | Stable pyjev-facing result and workflow contracts around SDK results |
+| Low-level retry, transport, and request controls    | Yes                                        | Intentionally delegated to the SDK                                   |
+| Named project decisions                             | Build your own application abstraction     | `.pyjev.toml` declarations                                           |
+| Offline decision validation and request preview     | Build your own tooling                     | `decision validate` and `compile_decision()`                         |
+| Deterministic decision-spec fingerprint             | Build your own                             | Yes                                                                  |
+| Reuse one named decision from Python and shell/CI   | Build your own                             | Yes                                                                  |
+| Shell-safe confidence gate and exit contract        | Build your own                             | Yes                                                                  |
+| Inspectable `build -> execute -> interpret` recipes | Cookbook or application code               | Yes                                                                  |
+| Bounded, ordered async batch records                | Build your own                             | `pyjev.amap`                                                         |
+| Latest or lower-level SDK features                  | Yes                                        | Use the SDK directly when pyjev does not expose them                 |
 
 > **Rule of thumb:** If the call is local implementation detail, the SDK is
 > usually enough. If the judgment has a stable name, is reviewed or reused, crosses
@@ -57,10 +58,7 @@ Use `typesafe-sdk` directly when:
 - low-level SDK controls are needed; or
 - a TypeSafe primitive is not currently exposed by pyjev.
 
-For example, the current pyjev decision model covers Noul, Choice, Score, and
-bundles of those primitives, not TypeSafe's `Box` primitive. The SDK also exposes
-lower-level request controls that pyjev intentionally does not mirror. Direct SDK
-use is an expected escape hatch, not a promise of complete SDK parity.
+pyjev wraps Noul, Choice, Score, and Box in its decision and result model and preserves structured question content in direct and named calls. It adds source-controlled identity, offline validation, deterministic fingerprints, and reusable results without replacing SDK question schemas or transport. Direct SDK use remains appropriate for low-level request controls or future features not yet represented by pyjev. The CLI deliberately does not transport images or execute live Box requests.
 
 ## When pyjev pays for itself
 
@@ -91,23 +89,23 @@ Both projects are useful and overlap on direct Jev primitives. They optimize for
 different layers rather than being interchangeable implementations of one
 product.
 
-| Use case or capability             | pyjev                                                              | `jev-cli` 0.6.2                                                                              |
-| ---------------------------------- | ------------------------------------------------------------------ | -------------------------------------------------------------------------------------------- |
-| Embed Jev in a Python application  | First-class `Jev` API                                              | Primarily a CLI/MCP tool                                                                     |
-| Native async Python integration    | `AsyncJev` uses the SDK async client                               | Not its primary API                                                                          |
-| Transport boundary                 | Delegates to the official `typesafe-sdk`                           | Direct provider-aware HTTP/request translation                                               |
-| Typed application results          | `NoulResult`, `ChoiceResult`, `ScoreResult`, `BundleResult`        | JSON close to the provider/remote contract                                                   |
-| Version-controlled named decisions | `.pyjev.toml` with schema and discovery                            | No equivalent named-decision declaration layer                                               |
-| Named mixed-question bundles       | Yes                                                                | Raw request capability, without the same declaration layer                                   |
-| Offline validation and compilation | Yes; no credential or network required                             | No equivalent named-decision compiler                                                        |
-| Confidence-gated automation        | Yes; failed `--value` gates emit no actionable stdout              | No equivalent confidence-policy gate                                                         |
-| Credential storage                 | Environment, OS keyring, or explicit plaintext fallback            | Environment or XDG JSON credential store                                                     |
-| Generic one-off shell primitives   | `noul`, `choice`, `score`, `run`                                   | `noul`, `choice`, `score`, `run`                                                             |
-| State and machine output           | stdin, file, JSON state, `--json`, `--value`                       | stdin, `@file`, JSON state, JSON-first output                                                |
-| Providers                          | Official SDK semantics                                             | Official, Vercel AI Gateway, OpenRouter, and custom Jev-compatible endpoint in this baseline |
-| MCP host integration               | Not currently                                                      | `jev-mcp` stdio server                                                                       |
-| Agent installation workflow        | Not currently                                                      | Bundled `jev install-skills` skill installer                                                 |
-| Online credential check            | `auth status` reports local source; `auth test` checks the service | `auth test`                                                                                  |
+| Use case or capability             | pyjev                                                                    | `jev-cli` 0.6.2                                                                              |
+| ---------------------------------- | ------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------- |
+| Embed Jev in a Python application  | First-class `Jev` API                                                    | Primarily a CLI/MCP tool                                                                     |
+| Native async Python integration    | `AsyncJev` uses the SDK async client                                     | Not its primary API                                                                          |
+| Transport boundary                 | Delegates to the official `typesafe-sdk`                                 | Direct provider-aware HTTP/request translation                                               |
+| Typed application results          | `NoulResult`, `ChoiceResult`, `ScoreResult`, `BoxResult`, `BundleResult` | JSON close to the provider/remote contract                                                   |
+| Version-controlled named decisions | `.pyjev.toml` with schema and discovery                                  | No equivalent named-decision declaration layer                                               |
+| Named mixed-question bundles       | Yes                                                                      | Raw request capability, without the same declaration layer                                   |
+| Offline validation and compilation | Yes; no credential or network required                                   | No equivalent named-decision compiler                                                        |
+| Confidence-gated automation        | Yes; failed `--value` gates emit no actionable stdout                    | No equivalent confidence-policy gate                                                         |
+| Credential storage                 | Environment, OS keyring, or explicit plaintext fallback                  | Environment or XDG JSON credential store                                                     |
+| Generic one-off shell primitives   | `noul`, `choice`, `score`, `run`                                         | `noul`, `choice`, `score`, `run`                                                             |
+| State and machine output           | stdin, file, JSON state, `--json`, `--value`                             | stdin, `@file`, JSON state, JSON-first output                                                |
+| Providers                          | Official SDK semantics                                                   | Official, Vercel AI Gateway, OpenRouter, and custom Jev-compatible endpoint in this baseline |
+| MCP host integration               | Not currently                                                            | `jev-mcp` stdio server                                                                       |
+| Agent installation workflow        | Not currently                                                            | Bundled `jev install-skills` skill installer                                                 |
+| Online credential check            | `auth status` reports local source; `auth test` checks the service       | `auth test`                                                                                  |
 
 `jev-cli` retains rich response data where the provider supplies it. pyjev's
 result wrappers are a stable Python-facing contract; the distinction is not that

@@ -1,4 +1,7 @@
-"""Classify the primary subject in a caller-supplied image."""
+"""Classify the primary subject in a caller-supplied image.
+
+For localization and a companion presence judgment, see image_localization.py.
+"""
 
 from __future__ import annotations
 

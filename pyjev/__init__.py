@@ -8,15 +8,15 @@ from importlib.metadata import version as package_version
 from pathlib import Path
 from typing import Any
 
-from typesafe_sdk import Asset, Image
+from typesafe_sdk import Asset, Content, ContentValue, Image, JSONContent, JSONValue
 
 from .batch import BatchError, BatchRecord, BatchResult, BatchSummary, amap
 from .client import AsyncJev, Jev
 from .compile import CompiledDecision, compile_decision
-from .decisions import BundleDecision, ChoiceDecision, Decision, NoulDecision, ScoreDecision
+from .decisions import BoxDecision, BundleDecision, ChoiceDecision, Decision, NoulDecision, ScoreDecision
 from .output import OutputPathError, format_json, format_jsonl, format_markdown, pluck, validate_pluck_path
 from .pipeline import Accepted, GateEvidence, Rejected
-from .results import BundleResult, ChoiceResult, NoulResult, ScoreResult
+from .results import BoxCoordinates, BoxResult, BundleResult, ChoiceResult, NoulResult, ScoreResult
 
 try:
     from ._version import __version__
@@ -36,13 +36,20 @@ def decide(
     api_key: str | None = None,
     images: bool = False,
     assets: Mapping[str, Asset] | None = None,
-) -> NoulResult | ChoiceResult | ScoreResult | BundleResult:
+) -> NoulResult | ChoiceResult | ScoreResult | BoxResult | BundleResult:
     """Evaluate a named decision using a short-lived convenience client."""
     with Jev(api_key=api_key, model=model, images=images) as jev:
         return jev.decide(name, state=state, config=config, model=model, assets=assets)
 
 
 __all__ = [
+    "BoxCoordinates",
+    "BoxDecision",
+    "BoxResult",
+    "Content",
+    "ContentValue",
+    "JSONContent",
+    "JSONValue",
     "Accepted",
     "amap",
     "BatchError",

@@ -115,3 +115,24 @@ def test_image_documentation_covers_opt_in_and_experimental_status() -> None:
     assert "dreamer-ready" in images.lower()
     assert "assets=" in images
     assert "images" in index
+
+
+def test_box_and_structured_content_documentation_boundaries() -> None:
+    readme = (ROOT / "README.md").read_text(encoding="utf-8").lower()
+    structured = ROOT / "docs" / "structured-content.md"
+    images = (ROOT / "docs" / "images.md").read_text(encoding="utf-8").lower()
+    confidence = (ROOT / "docs" / "confidence.md").read_text(encoding="utf-8").lower()
+    named = (ROOT / "docs" / "named-decisions.md").read_text(encoding="utf-8").lower()
+    why = (ROOT / "docs" / "why-pyjev.md").read_text(encoding="utf-8").lower()
+    docs_guidance = (ROOT / "docs" / "agent-skill.md").read_text(encoding="utf-8").lower()
+    skill = (ROOT / "skills" / "pyjev" / "SKILL.md").read_text(encoding="utf-8").lower()
+
+    assert "box" in readme and "structured question content" in readme
+    assert structured.exists()
+    assert "https://docs.typesafe.ai/primitives/advanced" in structured.read_text(encoding="utf-8")
+    assert "box" in images and "not found" in images and "noul" in images
+    assert "box" in confidence
+    assert "structured" in named
+    assert "bundles of those primitives, not typesafe's `box` primitive" not in why
+    assert "box" in docs_guidance and "structured" in docs_guidance
+    assert "box" in skill and "structured" in skill

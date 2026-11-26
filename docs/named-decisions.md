@@ -38,6 +38,46 @@ levels = ["Can wait", "Normal", "Urgent", "Critical"]
 Noul uses `true` and `false` criteria. Choice requires 2–255 options; Score requires
 2–10 ordered levels. Unknown fields and invalid criteria are rejected before API access.
 
+## Structured questions and Box
+
+The `question` field may be a string, object, or array. Structured content is passed to the official SDK as `instructions`; it is not formatted into a prompt string. Choice option values and Noul criteria become SDK `criteria`, while Score `levels` remain ordered criteria. Schema version 1 and existing string questions remain valid.
+
+```toml
+[decision.sender-check]
+type = "noul"
+question = { task = "Check sender identity", compare = ["sender.name", "sender.email"] }
+
+[decision.sender-check.true]
+definition = "The claimed sender identity conflicts with the email domain"
+
+[decision.route]
+type = "choice"
+question = { task = "Choose a team", consider = ["subject", "body"] }
+
+[decision.route.options.billing]
+covers = ["invoice", "refund"]
+
+[decision.urgency]
+type = "score"
+question = { task = "Rate impact", consider = ["blocked_work", "customer_impact"] }
+levels = [
+  { label = "routine", definition = "Normal handling" },
+  { label = "urgent", definition = "Work is blocked" },
+]
+```
+
+Box can also use structured instructions:
+
+```toml
+[decision.find-logo]
+type = "box"
+question = { target = "logo", image = "photo" }
+```
+
+`decision show --json`, `decision validate`, and `decision compile` inspect Box contracts offline. Live Box execution is available through the Python API only and requires `Jev(images=True)` or `AsyncJev(images=True)` with an SDK `Image` in state or an SDK asset. The CLI does not upload images.
+
+TOML contracts must remain JSON-compatible and cannot hold runtime SDK `Image` objects or image bytes. Use textual placeholders and provide actual image values through `state` or `assets=` at execution time. Object key order does not change a declaration fingerprint; array order does. See [Structured question content](structured-content.md) and [Image inputs](images.md) for details.
+
 ## Bundles
 
 A bundle asks several independent typed questions about one state in one SDK request:

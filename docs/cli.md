@@ -38,6 +38,14 @@ pyjev decision compile ticket-route --state "Stripe checkout fails"
 
 Compilation is offline and emits JSON by default. It never includes credentials.
 
+## Structured named decisions
+
+`decision show --json` preserves nested objects and arrays. Human-readable `decision show` renders a structured question as JSON instead of a Python representation. `decision validate` and `decision compile` remain offline, and compilation preserves the official SDK question shape. Live `decide` remains available for normal text or JSON state with structured declarations.
+
+## Box limitation
+
+The CLI has no image-path or image-asset transport. Box declarations can be listed, shown, validated, and compiled offline, but live `decide` requests for a Box decision or a bundle containing Box, and raw `run` requests with a Box question, are rejected locally before credential resolution. Use the Python API with `Jev(images=True)` and an SDK `Image` for live execution. pyjev adds no Box-upload CLI command.
+
 ## Confidence gates
 
 Choice and Score support `--min-confidence`. A valid result below the invocation threshold

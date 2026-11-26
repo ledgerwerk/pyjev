@@ -131,7 +131,7 @@ with Jev(images=True) as jev:
     )
 ```
 
-Image requests require `typesafe-sdk>=0.7.5` and send the image to the configured API. See [Image inputs](images.md) for named assets, current upstream limits, and data-handling guidance.
+Image requests require `typesafe-sdk>=0.7.6` and send the image to the configured API. See [Image inputs](images.md) for named assets, current upstream limits, and data-handling guidance.
 
 ## When to use a direct primitive
 

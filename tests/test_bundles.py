@@ -6,9 +6,20 @@ from typing import cast
 
 import pytest
 from typer.testing import CliRunner
-from typesafe_sdk import TypeSafeClient
+from typesafe_sdk import Box, TypeSafeClient
 
-from pyjev import BundleResult, ChoiceDecision, ChoiceResult, Jev, NoulDecision, NoulResult, ScoreDecision, ScoreResult
+from pyjev import (
+    BoxDecision,
+    BoxResult,
+    BundleResult,
+    ChoiceDecision,
+    ChoiceResult,
+    Jev,
+    NoulDecision,
+    NoulResult,
+    ScoreDecision,
+    ScoreResult,
+)
 from pyjev.cli import app
 from pyjev.decisions import BundleDecision, DecisionConfigError, load_decision
 
@@ -166,3 +177,82 @@ def test_bundle_cli_rejects_value_and_confidence_before_api(tmp_path: Path, monk
     assert "not valid for bundle" in value_result.output
     assert confidence_result.exit_code != 0
     assert "not valid for bundle" in confidence_result.output
+
+
+class MixedBoxAnswer:
+    def __init__(self, offset: float):
+        self.box = Dumpable(top=0.1, bottom=0.8, left=offset, right=offset + 0.2)
+        self.confidence = 0.86
+
+    def model_dump(self, mode: str = "python"):
+        del mode
+        return {
+            "type": "box",
+            "box": {"top": self.box.top, "bottom": self.box.bottom, "left": self.box.left, "right": self.box.right},
+            "confidence": self.confidence,
+        }
+
+
+class MixedBoxResponse:
+    model = "mixed-box-model"
+    request_id = "mixed-box-request"
+    usage = Dumpable(input_tokens=42, output_tokens=12)
+
+    def __init__(self, names: list[str]):
+        self.boxes = {
+            name: MixedBoxAnswer(0.05 * (index + 1)) for index, name in enumerate(names) if name.startswith("box-")
+        }
+        self.nouls = {name: Dumpable(type="noul", noul=0.8) for name in names if name.startswith("noul-")}
+        self.choices = {}
+        self.scores = {}
+
+    def model_dump(self, mode: str = "python"):
+        del mode
+        return {"model": self.model, "request_id": self.request_id}
+
+
+class MixedBoxClient:
+    def __init__(self):
+        self.calls = []
+        self.last_kwargs = {}
+
+    def system_one(self, **kwargs):
+        self.calls.append((kwargs["state"], kwargs["questions"], kwargs.get("model")))
+        self.last_kwargs = kwargs
+        return MixedBoxResponse(list(kwargs["questions"]))
+
+
+def test_mixed_three_box_three_noul_bundle_uses_one_request_and_preserves_results() -> None:
+    client = MixedBoxClient()
+    image = object()
+    assets = {"<reference>": object()}
+    decision = BundleDecision(
+        name="visual-inspection",
+        questions={
+            "box-water": BoxDecision("box-water", {"target": "water", "image": "photo"}),
+            "noul-drinkable": NoulDecision("noul-drinkable", {"task": "Is the drinkable item visible?"}),
+            "box-soda": BoxDecision("box-soda", {"target": "soda", "image": "photo"}),
+            "noul-party": NoulDecision("noul-party", {"task": "Are party supplies present?"}),
+            "box-hazard": BoxDecision("box-hazard", {"target": "hazard pictogram", "image": "photo"}),
+            "noul-soda": NoulDecision("noul-soda", {"task": "Is soda on the shelf?"}),
+        },
+    )
+
+    result = Jev(client=client, images=True).evaluate(decision, state={"photo": image}, assets=assets)
+
+    assert isinstance(result, BundleResult)
+    assert len(client.calls) == 1
+    assert list(result.answers) == list(decision.questions)
+    assert all(isinstance(result.answers[name], BoxResult) for name in ("box-water", "box-soda", "box-hazard"))
+    assert all(isinstance(result.answers[name], NoulResult) for name in ("noul-drinkable", "noul-party", "noul-soda"))
+    assert result.answers["box-water"].box["left"] == 0.05
+    assert result.answers["noul-drinkable"].value == 0.8
+    assert result.model == "mixed-box-model"
+    assert result.usage == {"input_tokens": 42, "output_tokens": 12}
+    assert result.request_id == "mixed-box-request"
+    sdk_questions = client.calls[0][1]
+    assert isinstance(sdk_questions["box-water"], Box)
+    assert sdk_questions["box-water"].instructions == {"target": "water", "image": "photo"}
+    assert client.last_kwargs["state"]["photo"] is image
+    assert client.last_kwargs["assets"] is assets
+    assert client.last_kwargs["extra_headers"] == {"TypeSafe-Danger-Zone-Images": "true"}

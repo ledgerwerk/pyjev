@@ -7,20 +7,24 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from typesafe_sdk import Choice, Noul, NoulCriteria, Question, Score
+from typesafe_sdk import Box, Choice, Content, Noul, NoulCriteria, Question, Score
 
 from .decisions import (
+    BoxDecision,
     BundleDecision,
     ChoiceDecision,
     Decision,
     NoulDecision,
     ScoreDecision,
+    _is_json_content,
     decision_spec_fingerprint,
     load_decision,
 )
 
 
-def validate_choice_criteria(choices: Mapping[str, Any | None] | Sequence[str]) -> dict[str, Any | None]:
+def validate_choice_criteria(
+    choices: Mapping[str, Content | None] | Sequence[str],
+) -> dict[str, Content | None]:
     """Normalize and validate Choice criteria before an SDK request."""
     if isinstance(choices, Mapping):
         criteria = dict(choices)
@@ -37,7 +41,7 @@ def validate_choice_criteria(choices: Mapping[str, Any | None] | Sequence[str]) 
     return criteria
 
 
-def validate_score_levels(levels: Sequence[Any]) -> list[Any]:
+def validate_score_levels(levels: Sequence[Content]) -> list[Content]:
     """Normalize and validate ordered Score levels before an SDK request."""
     values = list(levels)
     if not 2 <= len(values) <= 10:
@@ -45,7 +49,12 @@ def validate_score_levels(levels: Sequence[Any]) -> list[Any]:
     return values
 
 
-def build_noul(question: Any, *, true: Any | None = None, false: Any | None = None) -> Noul:
+def build_noul(
+    question: Content | None,
+    *,
+    true: Content | None = None,
+    false: Content | None = None,
+) -> Noul:
     """Build the official SDK Noul question used by live and compiled requests."""
     criteria: NoulCriteria | None = None
     if true is not None or false is not None:
@@ -53,14 +62,22 @@ def build_noul(question: Any, *, true: Any | None = None, false: Any | None = No
     return Noul(instructions=question, criteria=criteria)
 
 
-def build_choice(question: Any, choices: Mapping[str, Any | None] | Sequence[str]) -> Choice:
+def build_choice(
+    question: Content | None,
+    choices: Mapping[str, Content | None] | Sequence[str],
+) -> Choice:
     """Build the official SDK Choice question used by live and compiled requests."""
     return Choice(instructions=question, criteria=validate_choice_criteria(choices))
 
 
-def build_score(question: Any, levels: Sequence[Any]) -> Score:
+def build_score(question: Content | None, levels: Sequence[Content]) -> Score:
     """Build the official SDK Score question used by live and compiled requests."""
     return Score(instructions=question, criteria=validate_score_levels(levels))
+
+
+def build_box(question: Content | None) -> Box:
+    """Build the official SDK Box question used by live and compiled requests."""
+    return Box(instructions=question)
 
 
 def build_question(decision: Decision) -> Question:
@@ -71,6 +88,8 @@ def build_question(decision: Decision) -> Question:
         return build_choice(decision.question, decision.options)
     if isinstance(decision, ScoreDecision):
         return build_score(decision.question, decision.levels)
+    if isinstance(decision, BoxDecision):
+        return build_box(decision.question)
     raise TypeError(f"Unsupported decision type: {type(decision).__name__}")
 
 
@@ -123,7 +142,7 @@ class CompiledDecision:
 
 def _question_to_dict(question: Question) -> dict[str, Any]:
     """Serialize either an SDK question model or its raw dictionary form."""
-    if isinstance(question, (Noul, Choice, Score)):
+    if isinstance(question, (Noul, Choice, Score, Box)):
         return question.model_dump(mode="json")
     return dict(question)
 
@@ -144,7 +163,7 @@ def validate_runtime_decision(decision: Decision) -> Decision:
         for name, child in decision.questions.items():
             if not isinstance(name, str) or not name.strip():
                 raise ValueError("bundle question names must be nonempty strings")
-            if not isinstance(child, (NoulDecision, ChoiceDecision, ScoreDecision)):
+            if not isinstance(child, (NoulDecision, ChoiceDecision, ScoreDecision, BoxDecision)):
                 raise TypeError(f"unsupported decision type for bundle question {name!r}")
             if child.name != name:
                 raise ValueError(f"bundle question key {name!r} must match child decision name {child.name!r}")
@@ -152,21 +171,33 @@ def validate_runtime_decision(decision: Decision) -> Decision:
                 raise ValueError("child model overrides are not allowed in a bundle")
             _validate_runtime_primitive(child)
         return decision
-    if not isinstance(decision, (NoulDecision, ChoiceDecision, ScoreDecision)):
+    if not isinstance(decision, (NoulDecision, ChoiceDecision, ScoreDecision, BoxDecision)):
         raise TypeError(f"unsupported decision type: {type(decision).__name__}")
     _validate_runtime_primitive(decision)
     return decision
 
 
-def _validate_runtime_primitive(decision: NoulDecision | ChoiceDecision | ScoreDecision) -> None:
+def _validate_runtime_primitive(decision: NoulDecision | ChoiceDecision | ScoreDecision | BoxDecision) -> None:
     if not isinstance(decision.name, str) or not decision.name.strip():
         raise ValueError("decision name must be a nonempty string")
-    if not isinstance(decision.question, str) or not decision.question.strip():
-        raise ValueError("decision question must be a nonempty string")
+    if not _is_json_content(decision.question):
+        raise ValueError("decision question must be JSON-compatible string, object, or array content")
     if decision.model is not None and (not isinstance(decision.model, str) or not decision.model.strip()):
         raise ValueError("decision model must be a nonempty string or None")
-    # Constructing the SDK question performs the same local type/cardinality checks
-    # as named decisions and never resolves credentials or performs network I/O.
+    if isinstance(decision, NoulDecision):
+        if not _is_json_content(decision.true, allow_none=True):
+            raise ValueError("decision true criterion must be JSON-compatible content or None")
+        if not _is_json_content(decision.false, allow_none=True):
+            raise ValueError("decision false criterion must be JSON-compatible content or None")
+    elif isinstance(decision, ChoiceDecision):
+        for description in decision.options.values():
+            if not _is_json_content(description, allow_none=True):
+                raise ValueError("decision option descriptions must be JSON-compatible content or None")
+    elif isinstance(decision, ScoreDecision):
+        for level in decision.levels:
+            if not _is_json_content(level):
+                raise ValueError("decision score levels must be JSON-compatible content")
+    # Constructing the SDK question performs primitive-specific schema checks locally.
     build_question(decision)
 
 

@@ -20,8 +20,14 @@ The context manager closes clients created by `Jev`.
 - `jev.choice(...)` accepts a mapping of labels to criteria or a sequence of labels.
 - `jev.score(...)` accepts 2–10 ordered levels.
 
+- `Jev.box(...)` and native `AsyncJev.box(...)` return `BoxResult` with normalized coordinates and nullable confidence. Box requests require explicit image opt-in.
+
 All validation happens before the SDK call. Results preserve uncertainty instead of
 collapsing to a scalar convenience value.
+
+## Content types
+
+Public annotations reuse the official SDK aliases. `Content` represents text, JSON-like objects and arrays, and SDK assets such as `Image`; `JSONContent` is the corresponding asset-free JSON form. `ContentValue` and `JSONValue` describe nested values. pyjev re-exports these aliases instead of defining a competing recursive type. See [Structured question content](structured-content.md) for supported fields and named TOML examples.
 
 ## In-memory decisions
 
@@ -42,7 +48,7 @@ with Jev(model="jev-latest") as jev:
     result = jev.evaluate(decision, state={"message": "Checkout failed; please refund me."})
 ```
 
-`Jev.evaluate()` and `AsyncJev.evaluate()` accept `NoulDecision`, `ChoiceDecision`, `ScoreDecision`, and `BundleDecision`. Explicit `model=` overrides the declaration's model; otherwise the declaration model is used. A bundle shares one request and returns the usual typed child results in a `BundleResult`. Child model overrides are not allowed, matching named bundle rules. Constructing and locally validating decisions does not resolve credentials or make a request. `decide()` remains the convenient interface for declarations stored in `.pyjev.toml`.
+`Jev.evaluate()` and `AsyncJev.evaluate()` accept `NoulDecision`, `ChoiceDecision`, `ScoreDecision`, `BoxDecision`, and `BundleDecision`. Explicit `model=` overrides the declaration's model; otherwise the declaration model is used. A bundle shares one request and returns the usual typed child results in a `BundleResult`. Child model overrides are not allowed, matching named bundle rules. Constructing and locally validating decisions does not resolve credentials or make a request. `decide()` remains the convenient interface for declarations stored in `.pyjev.toml`.
 
 ## Named decisions
 
@@ -55,7 +61,7 @@ rules are described in [Named decisions](named-decisions.md).
 
 ## Image inputs (experimental)
 
-pyjev re-exports the official SDK `Image` class. Image support requires `typesafe-sdk>=0.7.5` and explicit `images=True`; TypeSafe currently describes it as dreamer-ready and experimental. When enabled, pyjev sends the required image opt-in header on every System One request. Inline `Image` objects in state, instructions, and criteria are passed to the SDK unchanged.
+pyjev re-exports the official SDK `Image` class. Image support requires `typesafe-sdk>=0.7.6` and explicit `images=True`; TypeSafe currently describes it as dreamer-ready and experimental. When enabled, pyjev sends the required image opt-in header on every System One request. Inline `Image` objects in state, instructions, and criteria are passed to the SDK unchanged.
 
 ```python
 from pathlib import Path
@@ -122,6 +128,7 @@ Use `jev.client` for SDK operations outside pyjev's higher-level surface, or inj
 Use `.value`, `.confidence`, `.probabilities`, and `.legend` as applicable. Every result
 also preserves model, usage, raw answer data, and request ID. `NoulResult.value` remains
 the raw probability of true.
+`BoxResult.value` and `.box` expose normalized edge coordinates; its confidence may be `None`.
 
 ## Result pipelines
 
@@ -143,7 +150,7 @@ else:
     human_review(outcome.result)
 ```
 
-`answer(name)` selects the exact typed child from a `BundleResult`. Confidence gates accept only `ChoiceResult` and `ScoreResult`, and preserve the complete result in either an `Accepted` or `Rejected` outcome. A rejected outcome has no `.value` attribute, so a below-threshold result cannot be mistaken for permission to act.
+`answer(name)` selects the exact typed child from a `BundleResult`. Confidence gates accept `ChoiceResult`, `ScoreResult`, and `BoxResult`, and preserve the complete result in either an `Accepted` or `Rejected` outcome. A rejected outcome has no `.value` attribute, so a below-threshold result cannot be mistaken for permission to act.
 
 For `NoulResult`, use the separate probability policy:
 
@@ -153,7 +160,7 @@ from pyjev.pipeline import require_probability
 outcome = result | require_probability(at_least=0.80)
 ```
 
-Thresholds are inclusive and must be finite values from 0 through 1. Choice and Score confidence is a Jev-supplied signal, not the probability that an answer is correct. The same local pipeline works after either synchronous or asynchronous evaluation.
+Thresholds are inclusive and must be finite values from 0 through 1. Choice, Score, and Box confidence is a Jev-supplied signal, not the probability that an answer is correct. Box confidence is distinct from its coordinates and may be `None`; a minimum-confidence gate rejects a missing value. The same local pipeline works after either synchronous or asynchronous evaluation.
 
 ## Async API
 

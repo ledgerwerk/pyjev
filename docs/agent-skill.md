@@ -22,6 +22,12 @@ The skill also documents credential-safe setup, `auth test`, and pyjev's
 project-specific exit codes. It does not expose a generic primitive MCP server;
 a future agent adapter should expose named-decision and offline tooling instead.
 
+## Structured content and Box
+
+Prefer object or array question content when named fields, relationships, or an existing taxonomy become clearer. Keep it structured through direct calls, named schema-1 contracts, inspection, and compilation. Do not serialize objects into prompt strings. Use the official SDK content aliases and let `typesafe-sdk` validate schemas and own serialization and transport.
+
+Box and image requests are experimental upstream. Live Box execution requires `Jev(images=True)` or `AsyncJev(images=True)` with SDK image content. A Box result is one set of coordinates, not a not-found outcome. Add a companion Noul in the same bundle when presence matters; choose thresholds in application policy. Use `typesafe-sdk` directly for lower-level controls not exposed by pyjev. The pyjev CLI supports offline Box inspection and compilation, but not image upload or live Box execution.
+
 ## Choosing a pattern
 
 - Stable reusable judgment: declare a named decision in `.pyjev.toml`; validate and compile before executing.

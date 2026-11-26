@@ -13,7 +13,7 @@ result wrappers.
 ## Noul
 
 Noul asks for a yes/no probability. `NoulResult.value` is the probability of true.
-pyjev does not silently convert it to `bool`, and Noul does not use the Choice/Score
+pyjev does not silently convert it to `bool`, and Noul does not use the Choice/Score/Box
 `confidence` field. Choose an application threshold explicitly if your action needs one.
 
 ## Choice
@@ -33,6 +33,14 @@ Runtime choices do not need to be static project configuration.
 Score evaluates state against ordered levels. The numeric score is the
 **probability-weighted position over the ordered levels**. `ScoreResult` also includes
 the legend and probability distribution; scores may be fractional.
+
+## Box
+
+Box localizes one target in an image and returns normalized `top`, `bottom`, `left`, and `right` coordinates with a separate nullable confidence signal. It has no explicit not-found result. When absence matters, use a companion Noul in the same bundle. Box and image input are experimental upstream and require `images=True`; the official SDK owns the image request and transport.
+
+## Structured content
+
+Structure is orthogonal to primitive type. An object or array can describe a Noul, Choice, Score, or Box instruction or criteria, while the existing primitive result meaning remains unchanged. pyjev preserves that content as structured data rather than converting it to a prompt string. Use structure when named fields or relationships improve clarity; a concise prose question remains appropriate for simple judgments.
 
 ## Exact logic versus judgment
 

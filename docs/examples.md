@@ -50,6 +50,22 @@ The default threshold is a demo application policy, not a Jev correctness guaran
 
 The top-N display is deterministic Python over Jev's preserved probability distribution; it is not a second model call.
 
+## Structured decisions
+
+`structured_decisions.py` demonstrates Noul, Choice, and Score in one named bundle with structured question, criteria, option, and level content. It is a pure-text example; it requires TypeSafe credentials to execute.
+
+```bash
+python examples/structured_decisions.py
+```
+
+## Box localization
+
+`image_localization.py` executes a named Box/Noul bundle with explicit `images=True`. It prints normalized coordinates and can convert them to pixel edges when dimensions are supplied. Box and image inputs are experimental upstream. A companion Noul provides a separate presence judgment; the example defines no universal threshold and writes no crops or files.
+
+```bash
+python examples/image_localization.py path/to/photo.jpg
+```
+
 ## Image inspection
 
 `image_inspection.py` demonstrates an inline SDK `Image` in structured state and a pyjev Choice with the required experimental opt-in.

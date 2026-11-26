@@ -84,10 +84,7 @@ weights = {
     "generalist": 0.10,
 }
 
-composite = sum(
-    weights[name] * result.answers[name].value / (len(result.answers[name].legend) - 1)
-    for name in weights
-)
+composite = sum(weights[name] * result.answers[name].value / (len(result.answers[name].legend) - 1) for name in weights)
 ```
 
 `ScoreResult.value` is the probability-weighted position over the ordered
@@ -102,9 +99,7 @@ policies without changing the atomic Jev questions.
 
 ## Confidence-gated routing
 
-`ChoiceResult.confidence` and `ScoreResult.confidence` are preserved separately
-from the selected value and probability distribution. Use the signal for the
-specific action being considered, with thresholds appropriate to that action:
+`ChoiceResult.confidence` and `ScoreResult.confidence` are preserved separately from the selected value and probability distribution. `BoxResult.confidence` is separate from its normalized coordinates and may be `None`; use a companion Noul when the policy needs a target-presence probability. Use confidence only for the specific action being considered, with thresholds appropriate to that action.
 
 ```python
 result = jev.decide("banking-intent", state=command)
@@ -119,11 +114,7 @@ else:
     ask_user_to_confirm()
 ```
 
-Confidence is not a correctness probability. It is a model signal that the
-caller may use as part of an explicit policy. The CLI exposes
-`--min-confidence` for direct Choice and Score decisions and named primitive
-decisions. Python policy is the right place for different thresholds per
-consequence.
+Confidence is not a correctness probability. It is a model signal that the caller may use as part of an explicit policy. The CLI exposes `--min-confidence` for direct Choice and Score decisions and named primitive decisions. Python `require_confidence` also accepts Box results, but rejects missing Box confidence. Keep thresholds in application code and select them for the consequence.
 
 ### Result-pipeline form
 
@@ -145,7 +136,7 @@ This is an ergonomic alternative to the explicit `if` form above. It does not ma
 Bundles deliberately have no aggregate confidence. A bundle may contain a
 high-confidence intent, a low-confidence severity, and another signal with a
 different consequence. Gate the child result that controls the action instead
-of inventing one bundle threshold. A `NoulResult` also has no Choice or Score
+of inventing one bundle threshold. A `NoulResult` also has no Choice, Score, or Box
 confidence field; use its explicit probability value when that is the relevant
 policy signal.
 

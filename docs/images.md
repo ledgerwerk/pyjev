@@ -8,7 +8,7 @@ If `images=True` is omitted, an image-bearing request may be rejected by the API
 
 ## Installation and image construction
 
-Image support requires `typesafe-sdk>=0.7.5`. Passing a path or bytes does not require an optional dependency:
+Image support requires `typesafe-sdk>=0.7.6`. Passing a path or bytes does not require an optional dependency:
 
 ```python
 from pathlib import Path
@@ -21,7 +21,7 @@ photo = Image(Path("photo.jpg"))
 The SDK also provides `Image.from_base64(...)`. `Image.from_pil(...)` is available when Pillow is installed through the optional SDK extra:
 
 ```bash
-pip install 'typesafe-sdk[pil]>=0.7.5,<1'
+pip install 'typesafe-sdk[pil]>=0.7.6,<1'
 ```
 
 Pillow is not a pyjev or base SDK dependency.
@@ -97,6 +97,39 @@ question = "Does the product in `returned` match <catalog-photo>?"
 ```
 
 Supply the actual SDK `Image` in `assets=` at execution time. Do not place binary data or base64 image blobs in decision TOML. `assets=` is available on the sync and native async decision methods; see [Python API](python-api.md).
+
+## Box localization
+
+`Jev.box(...)` localizes one target in an image and returns a `BoxResult`. Its `box` and `value` mappings contain normalized `top`, `bottom`, `left`, and `right` edge fractions from 0 through 1 relative to the source image.
+
+```python
+from pathlib import Path
+from pyjev import Image, Jev
+
+with Jev(images=True) as jev:
+    result = jev.box(
+        {"target": "coffee mug", "image": "photo"},
+        state={"photo": Image(Path("kitchen.jpg"))},
+    )
+```
+
+Multiply horizontal coordinates by the image width and vertical coordinates by its height when pixel edges are needed:
+
+```python
+box = result.box
+pixels = (
+    round(box["left"] * width),
+    round(box["top"] * height),
+    round(box["right"] * width),
+    round(box["bottom"] * height),
+)
+```
+
+Box always returns one box for a target and does not return a separate not found result. For several known targets, use multiple Box questions in one bundle, with one target per question. If presence matters, add a companion Noul to the same `BundleDecision`, then interpret the Noul probability and Box coordinates separately in application policy. No universal presence or confidence threshold is provided. Box confidence is separate from coordinates and may be `None`.
+
+Box instructions can be structured objects, for example `{"target": "mug", "image": "photo"}`. Named Box decisions and offline compilation are supported; provide runtime images through `state` or `assets=` and call `Jev(images=True)` or `AsyncJev(images=True)` for live requests. The bundled `examples/image_localization.py` demonstrates a named Box/Noul decision and optional coordinate conversion. The CLI does not upload images or execute live Box requests.
+
+Box and image behavior are experimental upstream. TypeSafe's official SDK continues to own question schemas, image assets, serialization, and transport. Do not implement image encoding or create output crops as part of a Box call.
 
 ## Text interpolation with `attach_assets`
 

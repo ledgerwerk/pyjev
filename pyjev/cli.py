@@ -32,6 +32,7 @@ from .credentials import (
     set_file_api_key,
 )
 from .decisions import (
+    BoxDecision,
     BundleDecision,
     DecisionConfigError,
     NoulDecision,
@@ -42,7 +43,7 @@ from .decisions import (
 )
 from .output import OutputPathError, format_json, validate_pluck_path
 from .output import pluck as pluck_value
-from .results import BundleResult, ChoiceResult, NoulResult, ScoreResult
+from .results import BoxResult, BundleResult, ChoiceResult, NoulResult, ScoreResult
 
 EXIT_OK = 0
 EXIT_RUNTIME_ERROR = 1
@@ -50,7 +51,7 @@ EXIT_USAGE = 2
 EXIT_CONFIDENCE = 3
 
 T = TypeVar("T")
-Result = BundleResult | NoulResult | ChoiceResult | ScoreResult
+Result = BundleResult | NoulResult | ChoiceResult | ScoreResult | BoxResult
 
 app = typer.Typer(
     no_args_is_help=True,
@@ -423,6 +424,14 @@ def decide(
         declaration = load_decision(name, config)
     except DecisionConfigError as exc:
         raise _parse_decision_error(exc) from exc
+    if isinstance(declaration, BoxDecision) or (
+        isinstance(declaration, BundleDecision)
+        and any(isinstance(child, BoxDecision) for child in declaration.questions.values())
+    ):
+        raise typer.BadParameter(
+            "Box decisions require image input and the experimental image opt-in.\n"
+            "Execute this decision through the Python API with Jev(images=True)."
+        )
     if isinstance(declaration, (NoulDecision, BundleDecision)) and min_confidence is not None:
         if isinstance(declaration, BundleDecision):
             raise typer.BadParameter("--min-confidence is not valid for bundle decisions.")
@@ -644,7 +653,10 @@ def decision_show(
         if isinstance(decision, BundleDecision):
             typer.echo(f"questions={','.join(decision.questions)}")
         else:
-            typer.echo(f"question={decision.question}")
+            if isinstance(decision.question, str):
+                typer.echo(f"question={decision.question}")
+            else:
+                typer.echo("question=" + format_json(decision.question, indent=None))
 
 
 @decision_app.command("validate")
@@ -703,6 +715,11 @@ def run(
     if not isinstance(questions, dict) or not questions:
         raise typer.BadParameter("'questions' must be a non-empty object.")
 
+    if any(isinstance(question, dict) and question.get("type") == "box" for question in questions.values()):
+        raise typer.BadParameter(
+            "Box questions require image input and the experimental image opt-in.\n"
+            "Execute this request through the Python API with Jev(images=True)."
+        )
     result = _run_api(
         lambda jev: jev.run(state=payload["state"], questions=questions),
         model=payload.get("model"),

@@ -1,4 +1,7 @@
-"""Compare a candidate image with a caller-supplied named reference image."""
+"""Compare a candidate image with a caller-supplied named reference image.
+
+For Box localization and a separate presence judgment, see image_localization.py.
+"""
 
 from __future__ import annotations
 

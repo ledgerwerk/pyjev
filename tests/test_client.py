@@ -223,3 +223,34 @@ def test_evaluate_rejects_invalid_runtime_decision_before_request():
     with pytest.raises(ValueError, match="between 2 and 255"):
         Jev(client=_as_client(client)).evaluate(decision, state="ticket")
     assert client.calls == []
+
+
+def test_sync_structured_choice_content_is_preserved() -> None:
+    client = FakeClient()
+    question = {"task": "Route the ticket", "fields": ["subject", "body"]}
+    choices = {"billing": {"covers": ["refund"]}, "engineering": {"covers": ["bug"]}}
+
+    Jev(client=_as_client(client)).choice(question, state={"subject": "refund"}, choices=choices)
+
+    sdk_question = client.calls[0][1]["answer"]
+    assert sdk_question.instructions == question
+    assert sdk_question.criteria == choices
+
+
+def test_sync_structured_noul_and_score_content_is_preserved() -> None:
+    client = FakeClient()
+    jev = Jev(client=_as_client(client))
+    question = {"task": "Check sender", "compare": ["name", "email"]}
+    true = {"definition": "Identity conflict"}
+    false = {"definition": "No material conflict"}
+    jev.noul(question, state={"ticket": "details"}, true=true, false=false)
+
+    score_question = {"task": "Rate urgency", "consider": ["impact", "blocked work"]}
+    levels = [{"label": "routine"}, {"label": "critical"}]
+    jev.score(score_question, state={"ticket": "details"}, levels=levels)
+
+    noul_sdk, score_sdk = (call[1]["answer"] for call in client.calls)
+    assert noul_sdk.instructions == question
+    assert noul_sdk.criteria == {"true": true, "false": false}
+    assert score_sdk.instructions == score_question
+    assert score_sdk.criteria == levels

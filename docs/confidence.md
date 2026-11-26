@@ -1,6 +1,6 @@
 # Confidence and policy
 
-Choice and Score expose several distinct signals:
+Choice, Score, and Box expose several distinct signals:
 
 - the selected option or score value;
 - the selected option's probability or score distribution;
@@ -12,6 +12,10 @@ Choice and Score expose several distinct signals:
 `ChoiceResult.confidence` is a separate signal from the selected option's probability.
 Do not describe it as the probability that the answer is correct.
 :::
+
+## Box confidence
+
+`BoxResult.confidence` is separate from the normalized coordinates in `BoxResult.box`. It can be `None` when the SDK response has no confidence value. pyjev preserves `None`; `require_confidence(minimum)` rejects that result when a minimum is required. Missing confidence is not a not-found signal, and Box confidence is not a presence probability. Use a companion Noul when target presence matters, and tune image thresholds on representative examples rather than assuming a universal cutoff.
 
 ## Gates
 
@@ -38,14 +42,14 @@ else:
     human_review(outcome.result)
 ```
 
-Both gates consume the same Choice/Score `confidence` signal. Neither treats that signal as a correctness probability, and a rejected Python outcome still preserves the complete result for review. `require_probability()` is a separate policy for a Noul probability of true.
+Choice, Score, and Box confidence are Jev-supplied signals, not probabilities that an answer is correct. Box gates reject missing confidence. `require_probability()` is separate and applies to a Noul probability of true.
 
 A threshold is invocation policy, not a universal Jev recommendation. Different actions
 have different consequences. Keep thresholds at the call site until a deliberate policy
 and outcome abstraction exists. pyjev does not add `min_confidence` to `.pyjev.toml` in
 this pass, and it does not invent a default threshold.
 
-Noul returns a probability of true and does not expose the Choice/Score confidence gate.
+Noul returns a probability of true and does not expose the Choice/Score/Box confidence gate.
 Choose and document an application policy explicitly when using Noul.
 
 The numeric exit codes are part of pyjev's CLI contract, not a Jev or cross-tool

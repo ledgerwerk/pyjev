@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, TypeAlias
+from typing import Any, TypeAlias, TypedDict
 
 
 @dataclass(frozen=True, slots=True)
@@ -56,7 +56,37 @@ class ScoreResult:
         return {**self.raw, "model": self.model, "usage": self.usage, "request_id": self.request_id}
 
 
-PrimitiveResult: TypeAlias = NoulResult | ChoiceResult | ScoreResult
+class BoxCoordinates(TypedDict):
+    """Normalized top, bottom, left, and right image coordinates."""
+
+    top: float
+    bottom: float
+    left: float
+    right: float
+
+
+@dataclass(frozen=True, slots=True)
+class BoxResult:
+    """A normalized image box, confidence, and response metadata."""
+
+    value: BoxCoordinates
+    confidence: float | None
+    model: str
+    usage: dict[str, Any]
+    raw: dict[str, Any]
+    request_id: str | None = None
+
+    @property
+    def box(self) -> BoxCoordinates:
+        """Return the normalized box coordinates."""
+        return self.value
+
+    def to_dict(self) -> dict[str, Any]:
+        """Return the raw answer with shared response metadata."""
+        return {**self.raw, "model": self.model, "usage": self.usage, "request_id": self.request_id}
+
+
+PrimitiveResult: TypeAlias = NoulResult | ChoiceResult | ScoreResult | BoxResult
 
 
 @dataclass(frozen=True, slots=True)

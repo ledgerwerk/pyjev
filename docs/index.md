@@ -66,6 +66,7 @@ abstraction.
 getting-started
 why-pyjev
 concepts
+structured-content
 recipes
 python-api
 images
@@ -89,6 +90,7 @@ changelog
 - [Decision patterns](patterns.md)
 - [Python API](python-api.md)
 - [Image inputs](images.md)
+- [Structured question content](structured-content.md)
 - [Semantic recipes](recipes.md)
 - [CLI and exit codes](cli.md)
 - [Confidence policy](confidence.md)

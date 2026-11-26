@@ -5,10 +5,12 @@ from pathlib import Path
 import pytest
 
 from pyjev.decisions import (
+    BoxDecision,
     ChoiceDecision,
     DecisionConfigError,
     NoulDecision,
     ScoreDecision,
+    decision_spec_fingerprint,
     find_config,
     load_config,
     load_decision,
@@ -133,3 +135,120 @@ def test_missing_schema_is_implicit_schema_one(tmp_path: Path) -> None:
 def test_invalid_schema_is_rejected_before_decisions(tmp_path: Path, text: str) -> None:
     with pytest.raises(DecisionConfigError, match=r"schema|unknown"):
         load_decisions(write_config(tmp_path, text))
+
+
+def test_loads_structured_questions_criteria_and_box(tmp_path: Path) -> None:
+    path = write_config(
+        tmp_path,
+        """
+[decision.noul]
+type = "noul"
+question = { task = "Check sender", compare = ["name", "email"] }
+true = { definition = "Conflict", examples = ["mismatch"] }
+false = { definition = "Consistent" }
+
+[decision.choice]
+type = "choice"
+question = { task = "Route", fields = ["subject", "body"] }
+
+[decision.choice.options.billing]
+covers = ["refund", "invoice"]
+
+[decision.choice.options.engineering]
+covers = ["bug"]
+
+[decision.score]
+type = "score"
+question = { task = "Rate urgency" }
+levels = [
+  { label = "routine", signals = ["informational"] },
+  { label = "critical", signals = ["blocked"] },
+]
+
+[decision.box]
+type = "box"
+
+[decision.box.question]
+target = "mug"
+image = "photo"
+""",
+    )
+
+    decisions = load_decisions(path)
+    assert decisions["noul"].question == {"task": "Check sender", "compare": ["name", "email"]}
+    assert decisions["noul"].true == {"definition": "Conflict", "examples": ["mismatch"]}
+    assert decisions["noul"].false == {"definition": "Consistent"}
+    assert decisions["choice"].options == {
+        "billing": {"covers": ["refund", "invoice"]},
+        "engineering": {"covers": ["bug"]},
+    }
+    assert decisions["score"].levels == (
+        {"label": "routine", "signals": ["informational"]},
+        {"label": "critical", "signals": ["blocked"]},
+    )
+    assert isinstance(decisions["box"], BoxDecision)
+    assert decisions["box"].question == {"target": "mug", "image": "photo"}
+
+
+@pytest.mark.parametrize(
+    "question",
+    ["42", "{ due = 2026-05-15 }", "{ threshold = nan }"],
+)
+def test_structured_question_rejects_invalid_roots_and_non_json_values(tmp_path: Path, question: str) -> None:
+    config = write_config(tmp_path, f'[decision.bad]\ntype = "noul"\nquestion = {question}\n')
+    with pytest.raises(DecisionConfigError, match="JSON-compatible"):
+        load_decisions(config)
+
+
+def test_structured_fingerprint_sorts_objects_but_preserves_arrays(tmp_path: Path) -> None:
+    first_dir = tmp_path / "first"
+    second_dir = tmp_path / "second"
+    changed_dir = tmp_path / "changed"
+    first_dir.mkdir()
+    second_dir.mkdir()
+    changed_dir.mkdir()
+    first = write_config(
+        first_dir,
+        '[decision.structured]\ntype="noul"\nquestion={task="Check", nested={left=1, right=2}, fields=["a", "b"]}\n',
+    )
+    second = write_config(
+        second_dir,
+        '[decision.structured]\ntype="noul"\nquestion={fields=["a", "b"], nested={right=2, left=1}, task="Check"}\n',
+    )
+    changed = write_config(
+        changed_dir,
+        '[decision.structured]\ntype="noul"\nquestion={task="Check", nested={left=1, right=3}, fields=["a", "b"]}\n',
+    )
+    assert decision_spec_fingerprint(load_decision("structured", first)) == decision_spec_fingerprint(
+        load_decision("structured", second)
+    )
+    assert decision_spec_fingerprint(load_decision("structured", first)) != decision_spec_fingerprint(
+        load_decision("structured", changed)
+    )
+    array_changed_dir = tmp_path / "array-changed"
+    array_changed_dir.mkdir()
+    array_changed = write_config(
+        array_changed_dir,
+        '[decision.structured]\ntype="noul"\nquestion={task="Check", nested={left=1, right=2}, fields=["b", "a"]}\n',
+    )
+    assert decision_spec_fingerprint(load_decision("structured", first)) != decision_spec_fingerprint(
+        load_decision("structured", array_changed)
+    )
+
+
+def test_score_level_order_changes_fingerprint(tmp_path: Path) -> None:
+    first_dir = tmp_path / "first"
+    second_dir = tmp_path / "second"
+    first_dir.mkdir()
+    second_dir.mkdir()
+    first = write_config(
+        first_dir,
+        '[decision.rate]\ntype="score"\nquestion="Rate"\nlevels=[{label="low"}, {label="high"}]\n',
+    )
+    second = write_config(
+        second_dir,
+        '[decision.rate]\ntype="score"\nquestion="Rate"\nlevels=[{label="high"}, {label="low"}]\n',
+    )
+    assert decision_spec_fingerprint(load_decision("rate", first)) != decision_spec_fingerprint(
+        load_decision("rate", second)
+    )

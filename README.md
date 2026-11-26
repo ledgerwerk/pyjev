@@ -127,6 +127,13 @@ Python to find literal invoice IDs, ask Jev to choose among only those literals,
 then let caller-owned policy decide whether to normalize, review, or persist the
 result. See [Semantic recipes](docs/recipes.md).
 
+## Primitive results
+
+- **Noul:** probability of true.
+- **Choice:** selected label, probabilities, and confidence.
+- **Score:** expected score over ordered levels, probabilities, and confidence.
+- **Box:** one set of normalized image coordinates and nullable confidence. Box and image input are experimental upstream and require explicit opt-in.
+
 ## Application policy
 
 Python result pipelines apply caller-owned policy to an already returned result.
@@ -148,6 +155,42 @@ Score below the requested threshold exits with code `3` and emits no actionable
 thresholds belong to the caller. A gate rejection is distinct from request or
 transport failure.
 
+## Structured questions
+
+Jev instructions and criteria do not have to be prose strings. pyjev preserves objects and arrays as structured question content in direct Python calls, named `.pyjev.toml` contracts, offline compilation, and fingerprints. Structure is useful when it makes fields and relationships clearer, not as ceremony for a one-line question. See [Structured question content](docs/structured-content.md).
+
+```toml
+[decision.ticket-route]
+type = "choice"
+question = { task = "Route the ticket", fields = ["subject", "body"] }
+
+[decision.ticket-route.options.billing]
+covers = ["invoice", "charge", "refund"]
+
+[decision.ticket-route.options.engineering]
+covers = ["bug", "technical failure"]
+```
+
+## Box localization (experimental)
+
+Box always returns one set of normalized image coordinates for one target. Image input and Box are experimental upstream and require explicit opt-in. The official SDK owns image assets and transport:
+
+```python
+from pathlib import Path
+from pyjev import Image, Jev
+
+with Jev(images=True) as jev:
+    location = jev.box(
+        {"target": "coffee mug", "image": "photo"},
+        state={"photo": Image(Path("kitchen.jpg"))},
+    )
+
+print(location.box)
+print(location.confidence)
+```
+
+A Box result has no explicit not-found outcome. When absence matters, ask a companion Noul question in the same bundle. pyjev's CLI can inspect and compile Box decisions offline, but cannot upload images or execute them live. See [Image inputs](docs/images.md) for normalized coordinates, presence checks, and limitations.
+
 ## When a named contract is not the right abstraction
 
 Not every judgment belongs in `.pyjev.toml`. If options or rubrics are computed
@@ -157,12 +200,10 @@ constraints in ordinary code and use Jev for judgment among the remaining valid
 alternatives.
 
 If you only need a few inline System One calls, have no need for pyjev's result,
-policy, credential, or CLI conventions, or need a TypeSafe primitive pyjev does
-not wrap, calling `typesafe-sdk` directly may be simpler. For example, pyjev's
-decision model covers Noul, Choice, Score, and bundles of those primitives, not
-TypeSafe's `Box` primitive. pyjev also leaves low-level SDK controls to the SDK.
-The official client remains available through `jev.client`, and callers can inject
-their own SDK client.
+policy, credential, or CLI conventions, or need custom SDK transport/retry controls,
+custom response models, or a lower-level feature not represented by pyjev,
+calling `typesafe-sdk` directly may be simpler. The official client remains available
+through `jev.client`, and callers can inject their own SDK client.
 
 ## Batch and automation
 
@@ -243,6 +284,7 @@ pip install -e '.[dev,docs]'
 - [Full documentation](docs/index.md)
 - [Getting started](docs/getting-started.md)
 - [Named decisions](docs/named-decisions.md)
+- [Structured question content](docs/structured-content.md)
 - [Semantic recipes](docs/recipes.md)
 - [Python API](docs/python-api.md)
 - [Image inputs](docs/images.md)

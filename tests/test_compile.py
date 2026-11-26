@@ -4,8 +4,9 @@ import json
 from pathlib import Path
 
 from typer.testing import CliRunner
+from typesafe_sdk import Box
 
-from pyjev import compile_decision
+from pyjev import BoxDecision, compile_decision
 from pyjev.cli import app
 
 runner = CliRunner()
@@ -83,3 +84,48 @@ def test_fingerprint_ignores_config_path_but_changes_with_specification(tmp_path
     second_path.write_text(changed, encoding="utf-8")
     changed_decision = compile_decision("route", state="state", config=second_path)
     assert changed_decision.fingerprint != first.fingerprint
+
+
+def test_compile_preserves_structured_choice_and_box_questions(tmp_path: Path) -> None:
+    path = tmp_path / ".pyjev.toml"
+    path.write_text(
+        """[decision.route]
+type = "choice"
+question = { task = "Route", fields = ["subject", "body"] }
+
+[decision.route.options.billing]
+covers = ["refund"]
+
+[decision.route.options.engineering]
+covers = ["bug"]
+
+[decision.find-mug]
+type = "box"
+
+[decision.find-mug.question]
+target = "mug"
+image = "photo"
+""",
+        encoding="utf-8",
+    )
+
+    choice = compile_decision("route", state="ticket", config=path)
+    assert choice.to_dict()["request"]["questions"]["answer"] == {
+        "type": "choice",
+        "instructions": {"task": "Route", "fields": ["subject", "body"]},
+        "criteria": {"billing": {"covers": ["refund"]}, "engineering": {"covers": ["bug"]}},
+    }
+
+    box = compile_decision("find-mug", state={"photo": "local placeholder"}, config=path)
+    assert isinstance(box.questions["answer"], Box)
+    assert box.to_dict()["request"]["questions"]["answer"] == {
+        "type": "box",
+        "instructions": {"target": "mug", "image": "photo"},
+    }
+
+
+def test_runtime_decision_validation_accepts_structured_box() -> None:
+    from pyjev.compile import validate_runtime_decision
+
+    decision = BoxDecision("find-mug", {"target": "mug", "image": "photo"})
+    assert validate_runtime_decision(decision) is decision

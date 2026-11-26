@@ -5,14 +5,30 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from types import TracebackType
-from typing import Any, overload
+from typing import Any, Literal, overload
 
-from typesafe_sdk import Asset, AsyncTypeSafeClient, Question, TypeSafeClient
+from typesafe_sdk import Asset, AsyncTypeSafeClient, Box, Content, Question, TypeSafeClient
 
-from .compile import build_choice, build_decision_questions, build_noul, build_score, validate_runtime_decision
+from .compile import (
+    build_box,
+    build_choice,
+    build_decision_questions,
+    build_noul,
+    build_score,
+    validate_runtime_decision,
+)
 from .credentials import get_api_key
-from .decisions import BundleDecision, ChoiceDecision, Decision, NoulDecision, ScoreDecision, load_decision
-from .results import BundleResult, ChoiceResult, NoulResult, PrimitiveResult, ScoreResult
+from .decisions import (
+    BoxDecision,
+    BundleDecision,
+    ChoiceDecision,
+    Decision,
+    NoulDecision,
+    PrimitiveDecision,
+    ScoreDecision,
+    load_decision,
+)
+from .results import BoxResult, BundleResult, ChoiceResult, NoulResult, PrimitiveResult, ScoreResult
 
 _IMAGE_HEADERS = {"TypeSafe-Danger-Zone-Images": "true"}
 
@@ -30,21 +46,43 @@ def _usage(response: Any) -> dict[str, Any]:
     return response.usage.model_dump(mode="json")
 
 
+def _uses_box(decision: Decision) -> bool:
+    if isinstance(decision, BoxDecision):
+        return True
+    if isinstance(decision, BundleDecision):
+        return any(isinstance(child, BoxDecision) for child in decision.questions.values())
+    return False
+
+
+def _is_box_question(question: Question) -> bool:
+    return isinstance(question, Box) or (isinstance(question, Mapping) and question.get("type") == "box")
+
+
 @overload
-def _primitive_result(response: Any, name: str, decision: NoulDecision) -> NoulResult: ...
 @overload
-def _primitive_result(response: Any, name: str, decision: ChoiceDecision) -> ChoiceResult: ...
+def _primitive_result(response: Any, name: str, decision: NoulDecision | Literal["noul"]) -> NoulResult: ...
+
+
 @overload
-def _primitive_result(response: Any, name: str, decision: ScoreDecision) -> ScoreResult: ...
+def _primitive_result(response: Any, name: str, decision: ChoiceDecision | Literal["choice"]) -> ChoiceResult: ...
+
+
+@overload
+def _primitive_result(response: Any, name: str, decision: ScoreDecision | Literal["score"]) -> ScoreResult: ...
+
+
+@overload
+def _primitive_result(response: Any, name: str, decision: BoxDecision | Literal["box"]) -> BoxResult: ...
 
 
 def _primitive_result(
     response: Any,
     name: str,
-    decision: NoulDecision | ChoiceDecision | ScoreDecision,
+    decision: PrimitiveDecision | Literal["noul", "choice", "score", "box"],
 ) -> PrimitiveResult:
     request_id = _request_id(response)
-    if isinstance(decision, NoulDecision):
+    kind = decision if isinstance(decision, str) else type(decision)
+    if kind in ("noul", NoulDecision):
         answer = response.nouls[name]
         return NoulResult(
             value=answer.noul,
@@ -53,12 +91,27 @@ def _primitive_result(
             raw=answer.model_dump(mode="json"),
             request_id=request_id,
         )
-    if isinstance(decision, ChoiceDecision):
+    if kind in ("choice", ChoiceDecision):
         answer = response.choices[name]
         return ChoiceResult(
             value=answer.choice,
             confidence=answer.confidence,
             probabilities=dict(answer.probabilities),
+            model=response.model,
+            usage=_usage(response),
+            raw=answer.model_dump(mode="json"),
+            request_id=request_id,
+        )
+    if kind in ("box", BoxDecision):
+        answer = response.boxes[name]
+        return BoxResult(
+            value={
+                "top": answer.box.top,
+                "bottom": answer.box.bottom,
+                "left": answer.box.left,
+                "right": answer.box.right,
+            },
+            confidence=answer.confidence,
             model=response.model,
             usage=_usage(response),
             raw=answer.model_dump(mode="json"),
@@ -109,7 +162,7 @@ class Jev:
     def _system_one(
         self,
         *,
-        state: Any,
+        state: Content,
         questions: Mapping[str, Question],
         model: str | None,
         assets: Mapping[str, Asset] | None = None,
@@ -121,6 +174,10 @@ class Jev:
             kwargs["extra_headers"] = _IMAGE_HEADERS
         return self._client.system_one(**kwargs)
 
+    def _require_box_images_enabled(self) -> None:
+        if not self._images:
+            raise ValueError("Box questions require Jev(images=True).")
+
     @property
     def client(self) -> TypeSafeClient:
         """Return the underlying SDK client."""
@@ -128,11 +185,11 @@ class Jev:
 
     def ask(
         self,
-        question: Any,
+        question: Content,
         *,
-        state: Any,
-        true: Any | None = None,
-        false: Any | None = None,
+        state: Content,
+        true: Content | None = None,
+        false: Content | None = None,
         model: str | None = None,
         assets: Mapping[str, Asset] | None = None,
     ) -> NoulResult:
@@ -141,11 +198,11 @@ class Jev:
 
     def noul(
         self,
-        question: Any,
+        question: Content,
         *,
-        state: Any,
-        true: Any | None = None,
-        false: Any | None = None,
+        state: Content,
+        true: Content | None = None,
+        false: Content | None = None,
         model: str | None = None,
         assets: Mapping[str, Asset] | None = None,
     ) -> NoulResult:
@@ -156,14 +213,14 @@ class Jev:
             model=model,
             assets=assets,
         )
-        return _primitive_result(response, "answer", NoulDecision("answer", str(question), true, false, model))
+        return _primitive_result(response, "answer", "noul")
 
     def choice(
         self,
-        question: Any,
+        question: Content,
         *,
-        state: Any,
-        choices: Mapping[str, Any | None] | Sequence[str],
+        state: Content,
+        choices: Mapping[str, Content | None] | Sequence[str],
         model: str | None = None,
         assets: Mapping[str, Asset] | None = None,
     ) -> ChoiceResult:
@@ -175,14 +232,14 @@ class Jev:
             model=model,
             assets=assets,
         )
-        return _primitive_result(response, "answer", ChoiceDecision("answer", str(question), criteria))
+        return _primitive_result(response, "answer", "choice")
 
     def score(
         self,
-        question: Any,
+        question: Content,
         *,
-        state: Any,
-        levels: Sequence[Any],
+        state: Content,
+        levels: Sequence[Content],
         model: str | None = None,
         assets: Mapping[str, Asset] | None = None,
     ) -> ScoreResult:
@@ -194,16 +251,34 @@ class Jev:
             model=model,
             assets=assets,
         )
-        return _primitive_result(response, "answer", ScoreDecision("answer", str(question), tuple(values)))
+        return _primitive_result(response, "answer", "score")
+
+    def box(
+        self,
+        question: Content | None,
+        *,
+        state: Content,
+        model: str | None = None,
+        assets: Mapping[str, Asset] | None = None,
+    ) -> BoxResult:
+        """Locate one target in image content using the experimental Box primitive."""
+        self._require_box_images_enabled()
+        response = self._system_one(
+            state=state,
+            questions={"answer": build_box(question)},
+            model=model,
+            assets=assets,
+        )
+        return _primitive_result(response, "answer", "box")
 
     def evaluate(
         self,
         decision: Decision,
         *,
-        state: Any,
+        state: Content,
         model: str | None = None,
         assets: Mapping[str, Asset] | None = None,
-    ) -> NoulResult | ChoiceResult | ScoreResult | BundleResult:
+    ) -> NoulResult | ChoiceResult | ScoreResult | BoxResult | BundleResult:
         """Evaluate a validated in-memory typed decision declaration.
 
         An explicit ``model`` overrides the declaration's model. A bundle is sent
@@ -211,6 +286,8 @@ class Jev:
         Decision construction and this method's local validation do not resolve
         credentials; only the call to the underlying SDK performs I/O.
         """
+        if _uses_box(decision):
+            self._require_box_images_enabled()
         validate_runtime_decision(decision)
         effective_model = model if model is not None else decision.model
         questions = build_decision_questions(decision)
@@ -230,11 +307,11 @@ class Jev:
         self,
         name: str,
         *,
-        state: Any,
+        state: Content,
         config: str | Path | None = None,
         model: str | None = None,
         assets: Mapping[str, Asset] | None = None,
-    ) -> NoulResult | ChoiceResult | ScoreResult | BundleResult:
+    ) -> NoulResult | ChoiceResult | ScoreResult | BoxResult | BundleResult:
         """Evaluate a named primitive or bundle decision from TOML."""
         decision = load_decision(name, config)
         return self.evaluate(decision, state=state, model=model, assets=assets)
@@ -243,7 +320,7 @@ class Jev:
         self,
         decision: BundleDecision,
         *,
-        state: Any,
+        state: Content,
         model: str | None,
         assets: Mapping[str, Asset] | None = None,
     ) -> BundleResult:
@@ -261,12 +338,14 @@ class Jev:
     def run(
         self,
         *,
-        state: Any,
+        state: Content,
         questions: Mapping[str, Question],
         model: str | None = None,
         assets: Mapping[str, Asset] | None = None,
     ) -> dict[str, Any]:
         """Evaluate several independent SDK questions in one request."""
+        if any(_is_box_question(question) for question in questions.values()):
+            self._require_box_images_enabled()
         response = self._system_one(state=state, questions=questions, model=model, assets=assets)
         return response.model_dump(mode="json")
 
@@ -325,7 +404,7 @@ class AsyncJev:
     async def _system_one(
         self,
         *,
-        state: Any,
+        state: Content,
         questions: Mapping[str, Question],
         model: str | None,
         assets: Mapping[str, Asset] | None = None,
@@ -337,6 +416,10 @@ class AsyncJev:
             kwargs["extra_headers"] = _IMAGE_HEADERS
         return await self._client.system_one(**kwargs)
 
+    def _require_box_images_enabled(self) -> None:
+        if not self._images:
+            raise ValueError("Box questions require AsyncJev(images=True).")
+
     @property
     def client(self) -> AsyncTypeSafeClient:
         """Return the underlying native async SDK client."""
@@ -344,11 +427,11 @@ class AsyncJev:
 
     async def ask(
         self,
-        question: Any,
+        question: Content,
         *,
-        state: Any,
-        true: Any | None = None,
-        false: Any | None = None,
+        state: Content,
+        true: Content | None = None,
+        false: Content | None = None,
         model: str | None = None,
         assets: Mapping[str, Asset] | None = None,
     ) -> NoulResult:
@@ -357,11 +440,11 @@ class AsyncJev:
 
     async def noul(
         self,
-        question: Any,
+        question: Content,
         *,
-        state: Any,
-        true: Any | None = None,
-        false: Any | None = None,
+        state: Content,
+        true: Content | None = None,
+        false: Content | None = None,
         model: str | None = None,
         assets: Mapping[str, Asset] | None = None,
     ) -> NoulResult:
@@ -372,14 +455,14 @@ class AsyncJev:
             model=model,
             assets=assets,
         )
-        return _primitive_result(response, "answer", NoulDecision("answer", str(question), true, false, model))
+        return _primitive_result(response, "answer", "noul")
 
     async def choice(
         self,
-        question: Any,
+        question: Content,
         *,
-        state: Any,
-        choices: Mapping[str, Any | None] | Sequence[str],
+        state: Content,
+        choices: Mapping[str, Content | None] | Sequence[str],
         model: str | None = None,
         assets: Mapping[str, Asset] | None = None,
     ) -> ChoiceResult:
@@ -391,14 +474,14 @@ class AsyncJev:
             model=model,
             assets=assets,
         )
-        return _primitive_result(response, "answer", ChoiceDecision("answer", str(question), criteria))
+        return _primitive_result(response, "answer", "choice")
 
     async def score(
         self,
-        question: Any,
+        question: Content,
         *,
-        state: Any,
-        levels: Sequence[Any],
+        state: Content,
+        levels: Sequence[Content],
         model: str | None = None,
         assets: Mapping[str, Asset] | None = None,
     ) -> ScoreResult:
@@ -410,21 +493,41 @@ class AsyncJev:
             model=model,
             assets=assets,
         )
-        return _primitive_result(response, "answer", ScoreDecision("answer", str(question), tuple(values)))
+        return _primitive_result(response, "answer", "score")
+
+    async def box(
+        self,
+        question: Content | None,
+        *,
+        state: Content,
+        model: str | None = None,
+        assets: Mapping[str, Asset] | None = None,
+    ) -> BoxResult:
+        """Locate one target in image content using the native async Box primitive."""
+        self._require_box_images_enabled()
+        response = await self._system_one(
+            state=state,
+            questions={"answer": build_box(question)},
+            model=model,
+            assets=assets,
+        )
+        return _primitive_result(response, "answer", "box")
 
     async def evaluate(
         self,
         decision: Decision,
         *,
-        state: Any,
+        state: Content,
         model: str | None = None,
         assets: Mapping[str, Asset] | None = None,
-    ) -> NoulResult | ChoiceResult | ScoreResult | BundleResult:
+    ) -> NoulResult | ChoiceResult | ScoreResult | BoxResult | BundleResult:
         """Evaluate an in-memory decision using the native async SDK client.
 
         An explicit ``model`` overrides the declaration's model. Independent bundle
         questions share one SDK request and retain their primitive result types.
         """
+        if _uses_box(decision):
+            self._require_box_images_enabled()
         validate_runtime_decision(decision)
         effective_model = model if model is not None else decision.model
         questions = build_decision_questions(decision)
@@ -444,11 +547,11 @@ class AsyncJev:
         self,
         name: str,
         *,
-        state: Any,
+        state: Content,
         config: str | Path | None = None,
         model: str | None = None,
         assets: Mapping[str, Asset] | None = None,
-    ) -> NoulResult | ChoiceResult | ScoreResult | BundleResult:
+    ) -> NoulResult | ChoiceResult | ScoreResult | BoxResult | BundleResult:
         """Evaluate a named primitive or bundle asynchronously."""
         decision = load_decision(name, config)
         return await self.evaluate(decision, state=state, model=model, assets=assets)
@@ -456,12 +559,14 @@ class AsyncJev:
     async def run(
         self,
         *,
-        state: Any,
+        state: Content,
         questions: Mapping[str, Question],
         model: str | None = None,
         assets: Mapping[str, Asset] | None = None,
     ) -> dict[str, Any]:
         """Evaluate several SDK questions asynchronously in one request."""
+        if any(_is_box_question(question) for question in questions.values()):
+            self._require_box_images_enabled()
         response = await self._system_one(state=state, questions=questions, model=model, assets=assets)
         return response.model_dump(mode="json")
 

@@ -273,3 +273,56 @@ question = "This message is sarcastic or intentionally ironic."
 [decision.emoji-jev.questions.joke]
 type = "noul"
 question = "This message is intended as a joke or humorous remark."
+
+
+[decision.structured-ticket]
+type = "bundle"
+
+[decision.structured-ticket.questions.sender-conflict]
+type = "noul"
+
+[decision.structured-ticket.questions.sender-conflict.question]
+task = "Check whether the claimed sender identity conflicts with the email domain"
+compare = ["sender.display_name", "sender.email"]
+
+[decision.structured-ticket.questions.sender-conflict.true]
+definition = "The claimed organization materially conflicts with the domain"
+
+[decision.structured-ticket.questions.sender-conflict.false]
+definition = "The identity and domain are consistent or neutral"
+
+[decision.structured-ticket.questions.route]
+type = "choice"
+
+[decision.structured-ticket.questions.route.question]
+task = "Select the owning support team"
+consider = ["subject", "body", "requested_action"]
+
+[decision.structured-ticket.questions.route.options.billing]
+covers = ["invoice", "charge", "refund"]
+
+[decision.structured-ticket.questions.route.options.engineering]
+covers = ["bug", "technical failure", "broken behavior"]
+
+[decision.structured-ticket.questions.route.options.sales]
+covers = ["pricing", "purchase", "procurement"]
+
+[decision.structured-ticket.questions.urgency]
+type = "score"
+question = { task = "Rate urgency", consider = ["impact", "blocked_work"] }
+levels = [
+  { label = "routine", definition = "Normal queue handling" },
+  { label = "important", definition = "Needs timely attention" },
+  { label = "critical", definition = "Work is blocked or impact is immediate" },
+]
+
+[decision.mug-localization]
+type = "bundle"
+
+[decision.mug-localization.questions.visible]
+type = "noul"
+question = { task = "Determine whether the target is visible", target = "coffee mug", image = "photo" }
+
+[decision.mug-localization.questions.location]
+type = "box"
+question = { task = "Locate the target", target = "coffee mug", image = "photo" }

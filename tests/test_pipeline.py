@@ -6,7 +6,7 @@ import math
 import pytest
 
 import pyjev.pipeline as pipeline
-from pyjev import BundleResult, ChoiceResult, NoulResult, ScoreResult
+from pyjev import BoxResult, BundleResult, ChoiceResult, NoulResult, ScoreResult
 from pyjev.pipeline import (
     Accepted,
     PipelineLookupError,
@@ -38,6 +38,16 @@ def score(value: float = 2.5, confidence: float = 0.85) -> ScoreResult:
         model="test-model",
         usage={},
         raw={"score": value, "confidence": confidence},
+    )
+
+
+def box(confidence: float | None = 0.85) -> BoxResult:
+    return BoxResult(
+        value={"top": 0.1, "bottom": 0.8, "left": 0.05, "right": 0.25},
+        confidence=confidence,
+        model="test-model",
+        usage={},
+        raw={"confidence": confidence},
     )
 
 
@@ -129,9 +139,28 @@ def test_confidence_gate_accepts_score() -> None:
     assert outcome.result is result
 
 
+@pytest.mark.parametrize(
+    ("confidence", "expected_pass"),
+    [(0.86, True), (0.80, True), (0.79, False), (None, False)],
+)
+def test_confidence_gate_handles_box_confidence(confidence: float | None, expected_pass: bool) -> None:
+    result = box(confidence)
+
+    outcome = result | require_confidence(0.80)
+
+    assert outcome.passed is expected_pass
+    assert outcome.result is result
+    assert outcome.gate.observed is confidence
+    if expected_pass:
+        assert isinstance(outcome, Accepted)
+        assert outcome.value == result.box
+    else:
+        assert isinstance(outcome, Rejected)
+
+
 @pytest.mark.parametrize("result", [noul(), bundle(intent=choice())])
 def test_confidence_gate_rejects_incompatible_result_types(result: object) -> None:
-    with pytest.raises(PipelineTypeError, match="ChoiceResult or ScoreResult"):
+    with pytest.raises(PipelineTypeError, match="ChoiceResult, ScoreResult, or BoxResult"):
         result | require_confidence(0.70)
 
 

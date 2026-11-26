@@ -87,7 +87,7 @@ version-controlled project identity that can be inspected and reused.
 
 ### Give it a stable identity
 
-Named Noul, Choice, Score, and bundle decisions live in `.pyjev.toml`. A stable
+Named Noul, Choice, Score, Box, and bundle decisions live in `.pyjev.toml`. A stable
 name makes the declaration reusable and reviewable instead of repeating its
 criteria in each call site.
 
@@ -210,9 +210,9 @@ Use `typesafe-sdk` directly when:
 - low-level SDK request controls are needed; or
 - a TypeSafe primitive is not exposed by pyjev.
 
-For example, the current pyjev decision model covers Noul, Choice, Score, and
-bundles of those primitives, not TypeSafe's `Box` primitive. Direct SDK use is an
-expected escape hatch, not a missing promise of SDK parity.
+pyjev supports Noul, Choice, Score, and Box in its Python decision and result model, and preserves structured content in direct calls and named contracts. Structured named decisions add source-control identity, offline validation, deterministic fingerprints, and the ability to reuse the same object structure from Python and shell without ad-hoc JSON-string prompt formatting.
+
+Use `typesafe-sdk` directly for custom transport or retry controls, custom response models, or a lower-level feature not represented by pyjev. pyjev does not promise immediate parity with every future SDK feature. The official client remains available through `jev.client`, and callers can inject their own SDK client.
 
 ## What pyjev deliberately does not own
 

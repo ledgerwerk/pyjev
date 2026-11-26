@@ -9,6 +9,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, TypeAlias
 
+from typesafe_sdk import JSONContent
+
 try:  # Python 3.11+
     import tomllib
 except ModuleNotFoundError:  # pragma: no cover - exercised on Python 3.10
@@ -28,9 +30,9 @@ class NoulDecision:
     """A named yes/no probability declaration."""
 
     name: str
-    question: str
-    true: Any | None = None
-    false: Any | None = None
+    question: JSONContent
+    true: JSONContent | None = None
+    false: JSONContent | None = None
     model: str | None = None
 
 
@@ -39,8 +41,8 @@ class ChoiceDecision:
     """A named closed-set Choice declaration."""
 
     name: str
-    question: str
-    options: dict[str, Any | None]
+    question: JSONContent
+    options: dict[str, JSONContent | None]
     model: str | None = None
 
 
@@ -49,12 +51,21 @@ class ScoreDecision:
     """A named ordered Score declaration."""
 
     name: str
-    question: str
-    levels: tuple[Any, ...]
+    question: JSONContent
+    levels: tuple[JSONContent, ...]
     model: str | None = None
 
 
-PrimitiveDecision: TypeAlias = NoulDecision | ChoiceDecision | ScoreDecision
+@dataclass(frozen=True, slots=True)
+class BoxDecision:
+    """A named image localization declaration."""
+
+    name: str
+    question: JSONContent
+    model: str | None = None
+
+
+PrimitiveDecision: TypeAlias = NoulDecision | ChoiceDecision | ScoreDecision | BoxDecision
 
 
 @dataclass(frozen=True, slots=True)
@@ -115,12 +126,31 @@ def _error(path: Path, name: str | None, field: str, message: str) -> DecisionCo
     return DecisionConfigError(f"{path}: {target}: {field}: {message}")
 
 
-def _json_compatible(value: Any) -> bool:
+def _is_json_content(value: Any, *, allow_none: bool = False) -> bool:
+    if value is None:
+        return allow_none
+    if not isinstance(value, (str, dict, list)):
+        return False
+    if isinstance(value, str) and not value.strip():
+        return False
     try:
-        json.dumps(value)
+        json.dumps(value, allow_nan=False)
     except (TypeError, ValueError):
         return False
     return True
+
+
+def _json_content(
+    value: Any,
+    path: Path,
+    name: str,
+    field: str,
+    *,
+    allow_none: bool = False,
+) -> JSONContent | None:
+    if not _is_json_content(value, allow_none=allow_none):
+        raise _error(path, name, field, "must be JSON-compatible string, object, or array content")
+    return value
 
 
 def _require_table(value: Any, path: Path, name: str | None, field: str) -> dict[str, Any]:
@@ -129,10 +159,9 @@ def _require_table(value: Any, path: Path, name: str | None, field: str) -> dict
     return value
 
 
-def _question(table: dict[str, Any], path: Path, name: str) -> str:
-    value = table.get("question")
-    if not isinstance(value, str) or not value.strip():
-        raise _error(path, name, "question", "must be a nonempty string")
+def _question(table: dict[str, Any], path: Path, name: str) -> JSONContent:
+    value = _json_content(table.get("question"), path, name, "question")
+    assert value is not None
     return value
 
 
@@ -153,22 +182,28 @@ def _check_fields(table: dict[str, Any], allowed: set[str], path: Path, name: st
 
 def _parse_primitive(name: str, table: dict[str, Any], path: Path, *, allow_model: bool = True) -> PrimitiveDecision:
     kind = table.get("type")
-    if kind not in {"noul", "choice", "score"}:
-        raise _error(path, name, "type", "must be exactly noul, choice, or score")
+    if kind not in {"noul", "choice", "score", "box"}:
+        raise _error(path, name, "type", "must be exactly noul, choice, score, or box")
     if not allow_model and "model" in table:
         raise _error(path, name, "model", "child model overrides are not allowed in a bundle")
     question = _question(table, path, name)
     model = _model(table, path, name) if allow_model else None
+
+    if kind == "box":
+        allowed = {"type", "question"}
+        if allow_model:
+            allowed.add("model")
+        _check_fields(table, allowed, path, name)
+        return BoxDecision(name=name, question=question, model=model)
 
     if kind == "noul":
         allowed = {"type", "question", "true", "false"}
         if allow_model:
             allowed.add("model")
         _check_fields(table, allowed, path, name)
-        for field in ("true", "false"):
-            if field in table and not _json_compatible(table[field]):
-                raise _error(path, name, field, "must be JSON-compatible")
-        return NoulDecision(name=name, question=question, true=table.get("true"), false=table.get("false"), model=model)
+        true = _json_content(table["true"], path, name, "true", allow_none=True) if "true" in table else None
+        false = _json_content(table["false"], path, name, "false", allow_none=True) if "false" in table else None
+        return NoulDecision(name=name, question=question, true=true, false=false, model=model)
 
     if kind == "choice":
         allowed = {"type", "question", "options"}
@@ -180,13 +215,17 @@ def _parse_primitive(name: str, table: dict[str, Any], path: Path, *, allow_mode
             raise _error(path, name, "options", "must be a TOML table")
         if not 2 <= len(options) <= 255:
             raise _error(path, name, "options", "must contain between 2 and 255 options")
-        parsed_options: dict[str, Any | None] = {}
+        parsed_options: dict[str, JSONContent | None] = {}
         for label, description in options.items():
             if not isinstance(label, str) or not label.strip():
                 raise _error(path, name, "options", "labels must be nonempty strings")
-            if not _json_compatible(description):
-                raise _error(path, name, f"options.{label}", "must be JSON-compatible")
-            parsed_options[label] = description
+            parsed_options[label] = _json_content(
+                description,
+                path,
+                name,
+                f"options.{label}",
+                allow_none=True,
+            )
         return ChoiceDecision(name=name, question=question, options=parsed_options, model=model)
 
     allowed = {"type", "question", "levels"}
@@ -198,9 +237,8 @@ def _parse_primitive(name: str, table: dict[str, Any], path: Path, *, allow_mode
         raise _error(path, name, "levels", "must be an array")
     if not 2 <= len(levels) <= 10:
         raise _error(path, name, "levels", "must contain between 2 and 10 levels")
-    if not all(_json_compatible(level) for level in levels):
-        raise _error(path, name, "levels", "must contain only JSON-compatible values")
-    return ScoreDecision(name=name, question=question, levels=tuple(levels), model=model)
+    parsed_levels = tuple(_json_content(level, path, name, f"levels[{index}]") for index, level in enumerate(levels))
+    return ScoreDecision(name=name, question=question, levels=parsed_levels, model=model)
 
 
 def _parse_decision(name: str, raw: Any, path: Path) -> Decision:
@@ -220,8 +258,8 @@ def _parse_decision(name: str, raw: Any, path: Path) -> Decision:
             question_table = _require_table(raw_question, path, f"{name}.{question_name}", "question")
             questions[question_name] = _parse_primitive(question_name, question_table, path, allow_model=False)
         return BundleDecision(name=name, questions=questions, model=_model(table, path, name))
-    if kind not in {"noul", "choice", "score"}:
-        raise _error(path, name, "type", "must be exactly noul, choice, score, or bundle")
+    if kind not in {"noul", "choice", "score", "box"}:
+        raise _error(path, name, "type", "must be exactly noul, choice, score, box, or bundle")
     return _parse_primitive(name, table, path)
 
 
@@ -301,6 +339,8 @@ def decision_to_dict(decision: Decision) -> dict[str, Any]:
             "question": decision.question,
             "options": decision.options,
         }
+    elif isinstance(decision, BoxDecision):
+        result = {"name": decision.name, "type": "box", "question": decision.question}
     else:
         result = {
             "name": decision.name,

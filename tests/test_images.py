@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+import pytest
 from typesafe_sdk import Image as SDKImage
 
 from pyjev import Image, decide
@@ -53,6 +54,12 @@ class _ImageResponse:
     model = "image-test"
     request_id = "image-request"
     usage = _Dumpable(input_tokens=10, output_tokens=2)
+    boxes = {
+        "answer": _Dumpable(
+            box=_Dumpable(top=0.12, bottom=0.77, left=0.06, right=0.22),
+            confidence=0.86,
+        )
+    }
     nouls = {"answer": _Dumpable(noul=0.91)}
     choices = {
         "answer": _Dumpable(
@@ -251,3 +258,163 @@ def test_async_decision_methods_forward_named_assets(tmp_path) -> None:
         assert all("extra_headers" not in call for call in client.calls)
 
     asyncio.run(run())
+
+
+def test_sync_box_preserves_structured_request_coordinates_and_assets() -> None:
+    from typesafe_sdk import Box as SDKBox
+
+    from pyjev import BoxResult, Jev
+
+    image = Image(b"photo bytes")
+    reference = Image(b"reference bytes")
+    assets = {"<reference>": reference}
+    question = {"target": "mug", "image": "photo"}
+    client = _SyncImageClient()
+
+    result = Jev(client=client, images=True).box(question, state={"photo": image}, assets=assets)
+
+    call = client.calls[0]
+    sdk_question = call["questions"]["answer"]
+    assert isinstance(result, BoxResult)
+    assert isinstance(sdk_question, SDKBox)
+    assert sdk_question.instructions == question
+    assert sdk_question.model_dump(mode="json") == {"type": "box", "instructions": question}
+    assert call["state"]["photo"] is image
+    assert call["assets"] is assets
+    assert call["extra_headers"] == {"TypeSafe-Danger-Zone-Images": "true"}
+    assert result.box == {"top": 0.12, "bottom": 0.77, "left": 0.06, "right": 0.22}
+    assert result.confidence == 0.86
+    assert result.request_id == "image-request"
+
+
+def test_sync_box_requires_explicit_image_opt_in_before_request() -> None:
+    from pyjev import Jev
+
+    client = _SyncImageClient()
+    with pytest.raises(ValueError, match="images=True"):
+        Jev(client=client).box("the mug", state="photo")
+    assert client.calls == []
+
+
+def test_async_box_requires_explicit_image_opt_in_before_request() -> None:
+    import asyncio
+
+    from pyjev import AsyncJev
+
+    async def run() -> None:
+        client = _AsyncImageClient()
+        with pytest.raises(ValueError, match="images=True"):
+            await AsyncJev(client=client).box("the mug", state="photo")
+        assert client.calls == []
+
+    asyncio.run(run())
+
+
+def test_box_decisions_and_raw_questions_require_image_opt_in() -> None:
+    from typesafe_sdk import Box
+
+    from pyjev import BoxDecision, BundleDecision, Jev, NoulDecision
+
+    client = _SyncImageClient()
+    jev = Jev(client=client)
+    with pytest.raises(ValueError, match="images=True"):
+        jev.evaluate(BoxDecision("location", "the mug"), state="photo")
+    with pytest.raises(ValueError, match="images=True"):
+        jev.evaluate(
+            BundleDecision(
+                "inspection",
+                {
+                    "visible": NoulDecision("visible", "Is a mug visible?"),
+                    "location": BoxDecision("location", "the mug"),
+                },
+            ),
+            state="photo",
+        )
+    with pytest.raises(ValueError, match="images=True"):
+        jev.run(state="photo", questions={"location": Box(instructions="the mug")})
+    with pytest.raises(ValueError, match="images=True"):
+        jev.run(state="photo", questions={"location": {"type": "box", "instructions": "the mug"}})
+    assert client.calls == []
+
+
+def test_async_box_decision_requires_image_opt_in_before_request() -> None:
+    import asyncio
+
+    from pyjev import AsyncJev, BoxDecision
+
+    async def run() -> None:
+        client = _AsyncImageClient()
+        with pytest.raises(ValueError, match="images=True"):
+            await AsyncJev(client=client).evaluate(BoxDecision("location", "the mug"), state="photo")
+        assert client.calls == []
+
+    asyncio.run(run())
+
+
+def test_named_box_decision_executes_with_image_opt_in(tmp_path) -> None:
+    from pyjev import BoxResult, Jev
+
+    config = tmp_path / ".pyjev.toml"
+    config.write_text(
+        '[decision.find-logo]\ntype = "box"\nquestion = { target = "logo", image = "photo" }\n',
+        encoding="utf-8",
+    )
+    client = _SyncImageClient()
+
+    result = Jev(client=client, images=True).decide("find-logo", state={"photo": Image(b"photo")}, config=config)
+
+    assert isinstance(result, BoxResult)
+    assert result.box["left"] == 0.06
+    assert client.calls[0]["questions"]["answer"].instructions == {"target": "logo", "image": "photo"}
+    assert client.calls[0]["extra_headers"] == {"TypeSafe-Danger-Zone-Images": "true"}
+
+
+def test_async_box_preserves_sdk_question_assets_and_image_header() -> None:
+    import asyncio
+
+    from typesafe_sdk import Box as SDKBox
+
+    from pyjev import AsyncJev, BoxResult
+
+    async def run() -> None:
+        image = Image(b"photo bytes")
+        reference = Image(b"reference bytes")
+        assets = {"<reference>": reference}
+        question = {"target": "mug", "image": "photo"}
+        client = _AsyncImageClient()
+        result = await AsyncJev(client=client, images=True).box(
+            question,
+            state={"photo": image},
+            assets=assets,
+        )
+
+        call = client.calls[0]
+        sdk_question = call["questions"]["answer"]
+        assert isinstance(result, BoxResult)
+        assert isinstance(sdk_question, SDKBox)
+        assert sdk_question.instructions == question
+        assert sdk_question.model_dump(mode="json") == {"type": "box", "instructions": question}
+        assert call["state"]["photo"] is image
+        assert call["assets"] is assets
+        assert call["extra_headers"] == {"TypeSafe-Danger-Zone-Images": "true"}
+        assert result.box == {"top": 0.12, "bottom": 0.77, "left": 0.06, "right": 0.22}
+        assert result.confidence == 0.86
+        assert result.request_id == "image-request"
+
+    asyncio.run(run())
+
+
+def test_public_content_aliases_and_box_types_are_exported() -> None:
+    from typesafe_sdk import Content as SDKContent
+    from typesafe_sdk import ContentValue as SDKContentValue
+    from typesafe_sdk import JSONContent as SDKJSONContent
+    from typesafe_sdk import JSONValue as SDKJSONValue
+
+    from pyjev import BoxDecision, BoxResult, Content, ContentValue, JSONContent, JSONValue
+
+    assert Content is SDKContent
+    assert ContentValue is SDKContentValue
+    assert JSONContent is SDKJSONContent
+    assert JSONValue is SDKJSONValue
+    assert BoxDecision.__name__ == "BoxDecision"
+    assert BoxResult.__name__ == "BoxResult"
