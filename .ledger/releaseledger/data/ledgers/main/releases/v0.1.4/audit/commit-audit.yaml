@@ -1,0 +1,137 @@
+schema_version: 1
+object_type: commit_audit_sheet
+versioning:
+  schema_version: 1
+  revision: 3
+release_version: v0.1.4
+git_base_ref: v0.1.3
+git_base_sha: a8e1bfd11178fd873a959ec38aab7acc994cd1c7
+git_head_ref: HEAD
+git_head_sha: 37aaa315f34dc373f751f02eb6f303f6d6aa1710
+git_range: a8e1bfd11178fd873a959ec38aab7acc994cd1c7..37aaa315f34dc373f751f02eb6f303f6d6aa1710
+commit_count: 2
+rows:
+  - sha: 13619052ee14766fcfa2a83fdd0ed679e615e836
+    source_ref: git:13619052ee14766fcfa2a83fdd0ed679e615e836
+    short_sha: "1361905"
+    changed_paths:
+      - README.md
+      - docs/agent-skill.md
+      - docs/comparisons.md
+      - docs/concepts.md
+      - docs/getting-started.md
+      - docs/index.md
+      - docs/python-api.md
+      - docs/recipes.md
+      - docs/why-pyjev.md
+      - pyproject.toml
+      - skills/pyjev/SKILL.md
+      - tests/test_docs.py
+    stats:
+      files_changed: 12
+      insertions: 560
+      deletions: 177
+    inspected: true
+    inspected_paths:
+      - README.md
+      - docs/agent-skill.md
+      - docs/comparisons.md
+      - docs/concepts.md
+      - docs/getting-started.md
+      - docs/index.md
+      - docs/python-api.md
+      - docs/recipes.md
+      - docs/why-pyjev.md
+      - pyproject.toml
+      - skills/pyjev/SKILL.md
+      - tests/test_docs.py
+    observed_behavior:
+      Documentation positions pyjev as a decision-contract layer over
+      typesafe-sdk, explains when direct SDK use is appropriate, and adds a dedicated
+      product-boundary guide; package metadata includes README.md.
+    public_impact: docs
+    decision: accepted
+    stale: false
+    evidence_subject: "doc: improved doc"
+    target_entry_id: entry-0001
+    notes: ""
+  - sha: 37aaa315f34dc373f751f02eb6f303f6d6aa1710
+    source_ref: git:37aaa315f34dc373f751f02eb6f303f6d6aa1710
+    short_sha: 37aaa31
+    changed_paths:
+      - README.md
+      - docs/agent-skill.md
+      - docs/cli.md
+      - docs/comparisons.md
+      - docs/concepts.md
+      - docs/confidence.md
+      - docs/examples.md
+      - docs/getting-started.md
+      - docs/images.md
+      - docs/index.md
+      - docs/named-decisions.md
+      - docs/patterns.md
+      - docs/python-api.md
+      - docs/structured-content.md
+      - docs/why-pyjev.md
+      - examples/.pyjev.toml
+      - examples/README.md
+      - examples/image_compare.py
+      - examples/image_inspection.py
+      - examples/image_localization.py
+      - examples/structured_decisions.py
+      - pyjev/__init__.py
+      - pyjev/cli.py
+      - pyjev/client.py
+      - pyjev/compile.py
+      - pyjev/decisions.py
+      - pyjev/pipeline.py
+      - pyjev/results.py
+      - pyproject.toml
+      - skills/pyjev/SKILL.md
+      - tests/test_async.py
+      - tests/test_bundles.py
+      - tests/test_cli.py
+      - tests/test_client.py
+      - tests/test_compile.py
+      - tests/test_decisions.py
+      - tests/test_docs.py
+      - tests/test_images.py
+      - tests/test_pipeline.py
+    stats:
+      files_changed: 39
+      insertions: 1536
+      deletions: 201
+    inspected: true
+    inspected_paths:
+      - README.md
+      - docs/cli.md
+      - docs/images.md
+      - docs/named-decisions.md
+      - docs/structured-content.md
+      - pyjev/__init__.py
+      - pyjev/client.py
+      - pyjev/compile.py
+      - pyjev/decisions.py
+      - pyjev/pipeline.py
+      - pyjev/results.py
+      - tests/test_async.py
+      - tests/test_bundles.py
+      - tests/test_cli.py
+      - tests/test_client.py
+      - tests/test_compile.py
+      - tests/test_decisions.py
+      - tests/test_images.py
+      - tests/test_pipeline.py
+    observed_behavior:
+      Sync and async Python clients support experimental Box questions
+      with normalized coordinates and nullable confidence; structured JSON-like questions
+      and criteria are preserved through primitive, named, bundled, and compile paths.
+      Box calls require images=True, while the CLI supports offline inspection and rejects
+      live Box execution.
+    public_impact: public
+    decision: accepted
+    stale: false
+    evidence_subject: "feat: box and structured questions"
+    target_entry_id: entry-0002
+    notes: ""

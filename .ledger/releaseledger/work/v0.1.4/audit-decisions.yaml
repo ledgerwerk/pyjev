@@ -1,0 +1,52 @@
+rows:
+  - sha: 13619052ee14766fcfa2a83fdd0ed679e615e836
+    inspected: true
+    inspected_paths:
+      - README.md
+      - docs/agent-skill.md
+      - docs/comparisons.md
+      - docs/concepts.md
+      - docs/getting-started.md
+      - docs/index.md
+      - docs/python-api.md
+      - docs/recipes.md
+      - docs/why-pyjev.md
+      - pyproject.toml
+      - skills/pyjev/SKILL.md
+      - tests/test_docs.py
+    observed_behavior: "Documentation positions pyjev as a decision-contract layer over typesafe-sdk, explains when direct SDK use is appropriate, and adds a dedicated product-boundary guide; package metadata includes README.md."
+    public_impact: docs
+    decision: accepted
+    target_entry_key: null
+    target_entry_id: null
+    notes: ""
+    stale: false
+  - sha: 37aaa315f34dc373f751f02eb6f303f6d6aa1710
+    inspected: true
+    inspected_paths:
+      - README.md
+      - docs/cli.md
+      - docs/images.md
+      - docs/named-decisions.md
+      - docs/structured-content.md
+      - pyjev/__init__.py
+      - pyjev/client.py
+      - pyjev/compile.py
+      - pyjev/decisions.py
+      - pyjev/pipeline.py
+      - pyjev/results.py
+      - tests/test_async.py
+      - tests/test_bundles.py
+      - tests/test_cli.py
+      - tests/test_client.py
+      - tests/test_compile.py
+      - tests/test_decisions.py
+      - tests/test_images.py
+      - tests/test_pipeline.py
+    observed_behavior: "Sync and async Python clients support experimental Box questions with normalized coordinates and nullable confidence; structured JSON-like questions and criteria are preserved through primitive, named, bundled, and compile paths. Box calls require images=True, while the CLI supports offline inspection and rejects live Box execution."
+    public_impact: public
+    decision: accepted
+    target_entry_key: null
+    target_entry_id: null
+    notes: ""
+    stale: false

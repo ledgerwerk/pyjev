@@ -1,0 +1,86 @@
+schema: releaseledger.entry-batch.v1
+operation: create
+schema_version: 1
+object_type: release_entry_batch
+release_version: v0.1.4
+git_base_ref: a8e1bfd11178fd873a959ec38aab7acc994cd1c7
+git_base_sha: a8e1bfd11178fd873a959ec38aab7acc994cd1c7
+git_head_ref: 37aaa315f34dc373f751f02eb6f303f6d6aa1710
+git_head_sha: 37aaa315f34dc373f751f02eb6f303f6d6aa1710
+include_merges: nontrivial
+entries:
+  - kind: docs
+    summary: "Documented pyjev's product boundary with typesafe-sdk and when direct SDK use is appropriate"
+    status: accepted
+    source_refs:
+      - git:13619052ee14766fcfa2a83fdd0ed679e615e836
+    paths:
+      - README.md
+      - docs/agent-skill.md
+      - docs/comparisons.md
+      - docs/concepts.md
+      - docs/getting-started.md
+      - docs/index.md
+      - docs/python-api.md
+      - docs/recipes.md
+      - docs/why-pyjev.md
+      - pyproject.toml
+      - skills/pyjev/SKILL.md
+      - tests/test_docs.py
+    sources:
+      - git:13619052ee14766fcfa2a83fdd0ed679e615e836
+    prs: []
+    issues: []
+    contributors:
+      - "@holgern"
+  - kind: added
+    summary: "Added experimental Box image localization and structured question content to Python APIs, bundles, and named decisions"
+    status: accepted
+    source_refs:
+      - git:37aaa315f34dc373f751f02eb6f303f6d6aa1710
+    paths:
+      - README.md
+      - docs/agent-skill.md
+      - docs/cli.md
+      - docs/comparisons.md
+      - docs/concepts.md
+      - docs/confidence.md
+      - docs/examples.md
+      - docs/getting-started.md
+      - docs/images.md
+      - docs/index.md
+      - docs/named-decisions.md
+      - docs/patterns.md
+      - docs/python-api.md
+      - docs/structured-content.md
+      - docs/why-pyjev.md
+      - examples/.pyjev.toml
+      - examples/README.md
+      - examples/image_compare.py
+      - examples/image_inspection.py
+      - examples/image_localization.py
+      - examples/structured_decisions.py
+      - pyjev/__init__.py
+      - pyjev/cli.py
+      - pyjev/client.py
+      - pyjev/compile.py
+      - pyjev/decisions.py
+      - pyjev/pipeline.py
+      - pyjev/results.py
+      - pyproject.toml
+      - skills/pyjev/SKILL.md
+      - tests/test_async.py
+      - tests/test_bundles.py
+      - tests/test_cli.py
+      - tests/test_client.py
+      - tests/test_compile.py
+      - tests/test_decisions.py
+      - tests/test_docs.py
+      - tests/test_images.py
+      - tests/test_pipeline.py
+    sources:
+      - git:37aaa315f34dc373f751f02eb6f303f6d6aa1710
+    prs: []
+    issues: []
+    contributors:
+      - "@holgern"

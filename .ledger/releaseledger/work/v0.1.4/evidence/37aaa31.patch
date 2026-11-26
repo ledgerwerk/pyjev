@@ -1,0 +1,2890 @@
+ README.md                        |  54 ++++++++--
+ docs/agent-skill.md              |   6 ++
+ docs/cli.md                      |   8 ++
+ docs/comparisons.md              |  68 ++++++------
+ docs/concepts.md                 |  10 +-
+ docs/confidence.md               |  10 +-
+ docs/examples.md                 |  16 +++
+ docs/getting-started.md          |   2 +-
+ docs/images.md                   |  37 ++++++-
+ docs/index.md                    |   2 +
+ docs/named-decisions.md          |  40 +++++++
+ docs/patterns.md                 |  17 +--
+ docs/python-api.md               |  15 ++-
+ docs/structured-content.md       |  99 +++++++++++++++++
+ docs/why-pyjev.md                |   8 +-
+ examples/.pyjev.toml             |  53 +++++++++
+ examples/README.md               |  18 ++++
+ examples/image_compare.py        |   5 +-
+ examples/image_inspection.py     |   5 +-
+ examples/image_localization.py   |  51 +++++++++
+ examples/structured_decisions.py |  50 +++++++++
+ pyjev/__init__.py                |  15 ++-
+ pyjev/cli.py                     |  23 +++-
+ pyjev/client.py                  | 225 ++++++++++++++++++++++++++++-----------
+ pyjev/compile.py                 |  59 +++++++---
+ pyjev/decisions.py               |  98 ++++++++++++-----
+ pyjev/pipeline.py                |  18 ++--
+ pyjev/results.py                 |  34 +++++-
+ pyproject.toml                   |   3 +-
+ skills/pyjev/SKILL.md            |  10 +-
+ tests/test_async.py              |  72 ++++++++++++-
+ tests/test_bundles.py            |  94 +++++++++++++++-
+ tests/test_cli.py                |  93 ++++++++++++++++
+ tests/test_client.py             |  31 ++++++
+ tests/test_compile.py            |  48 ++++++++-
+ tests/test_decisions.py          | 119 +++++++++++++++++++++
+ tests/test_docs.py               |  21 ++++
+ tests/test_images.py             | 167 +++++++++++++++++++++++++++++
+ tests/test_pipeline.py           |  33 +++++-
+ 39 files changed, 1536 insertions(+), 201 deletions(-)
+
+diff --git a/README.md b/README.md
+index 53cd9ce..3030767 100644
+--- a/README.md
++++ b/README.md
+@@ -127,6 +127,13 @@ Python to find literal invoice IDs, ask Jev to choose among only those literals,
+ then let caller-owned policy decide whether to normalize, review, or persist the
+ result. See [Semantic recipes](docs/recipes.md).
+
++## Primitive results
++
++- **Noul:** probability of true.
++- **Choice:** selected label, probabilities, and confidence.
++- **Score:** expected score over ordered levels, probabilities, and confidence.
++- **Box:** one set of normalized image coordinates and nullable confidence. Box and image input are experimental upstream and require explicit opt-in.
++
+ ## Application policy
+
+ Python result pipelines apply caller-owned policy to an already returned result.
+@@ -148,6 +155,42 @@ Score below the requested threshold exits with code `3` and emits no actionable
+ thresholds belong to the caller. A gate rejection is distinct from request or
+ transport failure.
+
++## Structured questions
++
++Jev instructions and criteria do not have to be prose strings. pyjev preserves objects and arrays as structured question content in direct Python calls, named `.pyjev.toml` contracts, offline compilation, and fingerprints. Structure is useful when it makes fields and relationships clearer, not as ceremony for a one-line question. See [Structured question content](docs/structured-content.md).
++
++```toml
++[decision.ticket-route]
++type = "choice"
++question = { task = "Route the ticket", fields = ["subject", "body"] }
++
++[decision.ticket-route.options.billing]
++covers = ["invoice", "charge", "refund"]
++
++[decision.ticket-route.options.engineering]
++covers = ["bug", "technical failure"]
++```
++
++## Box localization (experimental)
++
++Box always returns one set of normalized image coordinates for one target. Image input and Box are experimental upstream and require explicit opt-in. The official SDK owns image assets and transport:
++
++```python
++from pathlib import Path
++from pyjev import Image, Jev
++
++with Jev(images=True) as jev:
++    location = jev.box(
++        {"target": "coffee mug", "image": "photo"},
++        state={"photo": Image(Path("kitchen.jpg"))},
++    )
++
++print(location.box)
++print(location.confidence)
++```
++
++A Box result has no explicit not-found outcome. When absence matters, ask a companion Noul question in the same bundle. pyjev's CLI can inspect and compile Box decisions offline, but cannot upload images or execute them live. See [Image inputs](docs/images.md) for normalized coordinates, presence checks, and limitations.
++
+ ## When a named contract is not the right abstraction
+
+ Not every judgment belongs in `.pyjev.toml`. If options or rubrics are computed
+@@ -157,12 +200,10 @@ constraints in ordinary code and use Jev for judgment among the remaining valid
+ alternatives.
+
+ If you only need a few inline System One calls, have no need for pyjev's result,
+-policy, credential, or CLI conventions, or need a TypeSafe primitive pyjev does
+-not wrap, calling `typesafe-sdk` directly may be simpler. For example, pyjev's
+-decision model covers Noul, Choice, Score, and bundles of those primitives, not
+-TypeSafe's `Box` primitive. pyjev also leaves low-level SDK controls to the SDK.
+-The official client remains available through `jev.client`, and callers can inject
+-their own SDK client.
++policy, credential, or CLI conventions, or need custom SDK transport/retry controls,
++custom response models, or a lower-level feature not represented by pyjev,
++calling `typesafe-sdk` directly may be simpler. The official client remains available
++through `jev.client`, and callers can inject their own SDK client.
+
+ ## Batch and automation
+
+@@ -243,6 +284,7 @@ pip install -e '.[dev,docs]'
+ - [Full documentation](docs/index.md)
+ - [Getting started](docs/getting-started.md)
+ - [Named decisions](docs/named-decisions.md)
++- [Structured question content](docs/structured-content.md)
+ - [Semantic recipes](docs/recipes.md)
+ - [Python API](docs/python-api.md)
+ - [Image inputs](docs/images.md)
+diff --git a/docs/agent-skill.md b/docs/agent-skill.md
+index 8cd401e..61d6935 100644
+--- a/docs/agent-skill.md
++++ b/docs/agent-skill.md
+@@ -22,6 +22,12 @@ The skill also documents credential-safe setup, `auth test`, and pyjev's
+ project-specific exit codes. It does not expose a generic primitive MCP server;
+ a future agent adapter should expose named-decision and offline tooling instead.
+
++## Structured content and Box
++
++Prefer object or array question content when named fields, relationships, or an existing taxonomy become clearer. Keep it structured through direct calls, named schema-1 contracts, inspection, and compilation. Do not serialize objects into prompt strings. Use the official SDK content aliases and let `typesafe-sdk` validate schemas and own serialization and transport.
++
++Box and image requests are experimental upstream. Live Box execution requires `Jev(images=True)` or `AsyncJev(images=True)` with SDK image content. A Box result is one set of coordinates, not a not-found outcome. Add a companion Noul in the same bundle when presence matters; choose thresholds in application policy. Use `typesafe-sdk` directly for lower-level controls not exposed by pyjev. The pyjev CLI supports offline Box inspection and compilation, but not image upload or live Box execution.
++
+ ## Choosing a pattern
+
+ - Stable reusable judgment: declare a named decision in `.pyjev.toml`; validate and compile before executing.
+diff --git a/docs/cli.md b/docs/cli.md
+index 252b931..73523a9 100644
+--- a/docs/cli.md
++++ b/docs/cli.md
+@@ -38,6 +38,14 @@ pyjev decision compile ticket-route --state "Stripe checkout fails"
+
+ Compilation is offline and emits JSON by default. It never includes credentials.
+
++## Structured named decisions
++
++`decision show --json` preserves nested objects and arrays. Human-readable `decision show` renders a structured question as JSON instead of a Python representation. `decision validate` and `decision compile` remain offline, and compilation preserves the official SDK question shape. Live `decide` remains available for normal text or JSON state with structured declarations.
++
++## Box limitation
++
++The CLI has no image-path or image-asset transport. Box declarations can be listed, shown, validated, and compiled offline, but live `decide` requests for a Box decision or a bundle containing Box, and raw `run` requests with a Box question, are rejected locally before credential resolution. Use the Python API with `Jev(images=True)` and an SDK `Image` for live execution. pyjev adds no Box-upload CLI command.
++
+ ## Confidence gates
+
+ Choice and Score support `--min-confidence`. A valid result below the invocation threshold
+diff --git a/docs/comparisons.md b/docs/comparisons.md
+index c851ee9..e70029c 100644
+--- a/docs/comparisons.md
++++ b/docs/comparisons.md
+@@ -9,20 +9,21 @@ reuse across runtime surfaces, explicit interpretation or policy, or packaged
+ semantic workflows. See [Why pyjev?](why-pyjev.md) for the full product-boundary
+ explanation.
+
+-| Need                                                | `typesafe-sdk`                         | `pyjev`                                                              |
+-| --------------------------------------------------- | -------------------------------------- | -------------------------------------------------------------------- |
+-| Make a System One request                           | Yes, the primary API                   | Yes, delegates to the SDK                                            |
+-| Sync and async clients                              | Yes                                    | Yes, with pyjev decision and recipe APIs                             |
+-| Typed questions and answers                         | Yes, SDK models                        | Stable pyjev-facing result and workflow contracts around SDK results |
+-| Low-level retry, transport, and request controls    | Yes                                    | Intentionally delegated to the SDK                                   |
+-| Named project decisions                             | Build your own application abstraction | `.pyjev.toml` declarations                                           |
+-| Offline decision validation and request preview     | Build your own tooling                 | `decision validate` and `compile_decision()`                         |
+-| Deterministic decision-spec fingerprint             | Build your own                         | Yes                                                                  |
+-| Reuse one named decision from Python and shell/CI   | Build your own                         | Yes                                                                  |
+-| Shell-safe confidence gate and exit contract        | Build your own                         | Yes                                                                  |
+-| Inspectable `build -> execute -> interpret` recipes | Cookbook or application code           | Yes                                                                  |
+-| Bounded, ordered async batch records                | Build your own                         | `pyjev.amap`                                                         |
+-| Latest or lower-level SDK features                  | Yes                                    | Use the SDK directly when pyjev does not expose them                 |
++| Need                                                | `typesafe-sdk`                             | `pyjev`                                                              |
++| --------------------------------------------------- | ------------------------------------------ | -------------------------------------------------------------------- |
++| Make a System One request                           | Yes, the primary API                       | Yes, delegates to the SDK                                            |
++| Sync and async clients                              | Yes                                        | Yes, with pyjev decision and recipe APIs                             |
++| Box and structured content                          | Official question models and content types | Typed Box result and structured direct/named contracts               |
++| Typed questions and answers                         | Yes, SDK models                            | Stable pyjev-facing result and workflow contracts around SDK results |
++| Low-level retry, transport, and request controls    | Yes                                        | Intentionally delegated to the SDK                                   |
++| Named project decisions                             | Build your own application abstraction     | `.pyjev.toml` declarations                                           |
++| Offline decision validation and request preview     | Build your own tooling                     | `decision validate` and `compile_decision()`                         |
++| Deterministic decision-spec fingerprint             | Build your own                             | Yes                                                                  |
++| Reuse one named decision from Python and shell/CI   | Build your own                             | Yes                                                                  |
++| Shell-safe confidence gate and exit contract        | Build your own                             | Yes                                                                  |
++| Inspectable `build -> execute -> interpret` recipes | Cookbook or application code               | Yes                                                                  |
++| Bounded, ordered async batch records                | Build your own                             | `pyjev.amap`                                                         |
++| Latest or lower-level SDK features                  | Yes                                        | Use the SDK directly when pyjev does not expose them                 |
+
+ > **Rule of thumb:** If the call is local implementation detail, the SDK is
+ > usually enough. If the judgment has a stable name, is reviewed or reused, crosses
+@@ -57,10 +58,7 @@ Use `typesafe-sdk` directly when:
+ - low-level SDK controls are needed; or
+ - a TypeSafe primitive is not currently exposed by pyjev.
+
+-For example, the current pyjev decision model covers Noul, Choice, Score, and
+-bundles of those primitives, not TypeSafe's `Box` primitive. The SDK also exposes
+-lower-level request controls that pyjev intentionally does not mirror. Direct SDK
+-use is an expected escape hatch, not a promise of complete SDK parity.
++pyjev wraps Noul, Choice, Score, and Box in its decision and result model and preserves structured question content in direct and named calls. It adds source-controlled identity, offline validation, deterministic fingerprints, and reusable results without replacing SDK question schemas or transport. Direct SDK use remains appropriate for low-level request controls or future features not yet represented by pyjev. The CLI deliberately does not transport images or execute live Box requests.
+
+ ## When pyjev pays for itself
+
+@@ -91,23 +89,23 @@ Both projects are useful and overlap on direct Jev primitives. They optimize for
+ different layers rather than being interchangeable implementations of one
+ product.
+
+-| Use case or capability             | pyjev                                                              | `jev-cli` 0.6.2                                                                              |
+-| ---------------------------------- | ------------------------------------------------------------------ | -------------------------------------------------------------------------------------------- |
+-| Embed Jev in a Python application  | First-class `Jev` API                                              | Primarily a CLI/MCP tool                                                                     |
+-| Native async Python integration    | `AsyncJev` uses the SDK async client                               | Not its primary API                                                                          |
+-| Transport boundary                 | Delegates to the official `typesafe-sdk`                           | Direct provider-aware HTTP/request translation                                               |
+-| Typed application results          | `NoulResult`, `ChoiceResult`, `ScoreResult`, `BundleResult`        | JSON close to the provider/remote contract                                                   |
+-| Version-controlled named decisions | `.pyjev.toml` with schema and discovery                            | No equivalent named-decision declaration layer                                               |
+-| Named mixed-question bundles       | Yes                                                                | Raw request capability, without the same declaration layer                                   |
+-| Offline validation and compilation | Yes; no credential or network required                             | No equivalent named-decision compiler                                                        |
+-| Confidence-gated automation        | Yes; failed `--value` gates emit no actionable stdout              | No equivalent confidence-policy gate                                                         |
+-| Credential storage                 | Environment, OS keyring, or explicit plaintext fallback            | Environment or XDG JSON credential store                                                     |
+-| Generic one-off shell primitives   | `noul`, `choice`, `score`, `run`                                   | `noul`, `choice`, `score`, `run`                                                             |
+-| State and machine output           | stdin, file, JSON state, `--json`, `--value`                       | stdin, `@file`, JSON state, JSON-first output                                                |
+-| Providers                          | Official SDK semantics                                             | Official, Vercel AI Gateway, OpenRouter, and custom Jev-compatible endpoint in this baseline |
+-| MCP host integration               | Not currently                                                      | `jev-mcp` stdio server                                                                       |
+-| Agent installation workflow        | Not currently                                                      | Bundled `jev install-skills` skill installer                                                 |
+-| Online credential check            | `auth status` reports local source; `auth test` checks the service | `auth test`                                                                                  |
++| Use case or capability             | pyjev                                                                    | `jev-cli` 0.6.2                                                                              |
++| ---------------------------------- | ------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------- |
++| Embed Jev in a Python application  | First-class `Jev` API                                                    | Primarily a CLI/MCP tool                                                                     |
++| Native async Python integration    | `AsyncJev` uses the SDK async client                                     | Not its primary API                                                                          |
++| Transport boundary                 | Delegates to the official `typesafe-sdk`                                 | Direct provider-aware HTTP/request translation                                               |
++| Typed application results          | `NoulResult`, `ChoiceResult`, `ScoreResult`, `BoxResult`, `BundleResult` | JSON close to the provider/remote contract                                                   |
++| Version-controlled named decisions | `.pyjev.toml` with schema and discovery                                  | No equivalent named-decision declaration layer                                               |
++| Named mixed-question bundles       | Yes                                                                      | Raw request capability, without the same declaration layer                                   |
++| Offline validation and compilation | Yes; no credential or network required                                   | No equivalent named-decision compiler                                                        |
++| Confidence-gated automation        | Yes; failed `--value` gates emit no actionable stdout                    | No equivalent confidence-policy gate                                                         |
++| Credential storage                 | Environment, OS keyring, or explicit plaintext fallback                  | Environment or XDG JSON credential store                                                     |
++| Generic one-off shell primitives   | `noul`, `choice`, `score`, `run`                                         | `noul`, `choice`, `score`, `run`                                                             |
++| State and machine output           | stdin, file, JSON state, `--json`, `--value`                             | stdin, `@file`, JSON state, JSON-first output                                                |
++| Providers                          | Official SDK semantics                                                   | Official, Vercel AI Gateway, OpenRouter, and custom Jev-compatible endpoint in this baseline |
++| MCP host integration               | Not currently                                                            | `jev-mcp` stdio server                                                                       |
++| Agent installation workflow        | Not currently                                                            | Bundled `jev install-skills` skill installer                                                 |
++| Online credential check            | `auth status` reports local source; `auth test` checks the service       | `auth test`                                                                                  |
+
+ `jev-cli` retains rich response data where the provider supplies it. pyjev's
+ result wrappers are a stable Python-facing contract; the distinction is not that
+diff --git a/docs/concepts.md b/docs/concepts.md
+index 9c996d7..688ec55 100644
+--- a/docs/concepts.md
++++ b/docs/concepts.md
+@@ -13,7 +13,7 @@ result wrappers.
+ ## Noul
+
+ Noul asks for a yes/no probability. `NoulResult.value` is the probability of true.
+-pyjev does not silently convert it to `bool`, and Noul does not use the Choice/Score
++pyjev does not silently convert it to `bool`, and Noul does not use the Choice/Score/Box
+ `confidence` field. Choose an application threshold explicitly if your action needs one.
+
+ ## Choice
+@@ -34,6 +34,14 @@ Score evaluates state against ordered levels. The numeric score is the
+ **probability-weighted position over the ordered levels**. `ScoreResult` also includes
+ the legend and probability distribution; scores may be fractional.
+
++## Box
++
++Box localizes one target in an image and returns normalized `top`, `bottom`, `left`, and `right` coordinates with a separate nullable confidence signal. It has no explicit not-found result. When absence matters, use a companion Noul in the same bundle. Box and image input are experimental upstream and require `images=True`; the official SDK owns the image request and transport.
++
++## Structured content
++
++Structure is orthogonal to primitive type. An object or array can describe a Noul, Choice, Score, or Box instruction or criteria, while the existing primitive result meaning remains unchanged. pyjev preserves that content as structured data rather than converting it to a prompt string. Use structure when named fields or relationships improve clarity; a concise prose question remains appropriate for simple judgments.
++
+ ## Exact logic versus judgment
+
+ Keep deterministic facts in ordinary code: legal moves, schema validation, permissions,
+diff --git a/docs/confidence.md b/docs/confidence.md
+index 51de7d8..03ae59f 100644
+--- a/docs/confidence.md
++++ b/docs/confidence.md
+@@ -1,6 +1,6 @@
+ # Confidence and policy
+
+-Choice and Score expose several distinct signals:
++Choice, Score, and Box expose several distinct signals:
+
+ - the selected option or score value;
+ - the selected option's probability or score distribution;
+@@ -13,6 +13,10 @@ Choice and Score expose several distinct signals:
+ Do not describe it as the probability that the answer is correct.
+ :::
+
++## Box confidence
++
++`BoxResult.confidence` is separate from the normalized coordinates in `BoxResult.box`. It can be `None` when the SDK response has no confidence value. pyjev preserves `None`; `require_confidence(minimum)` rejects that result when a minimum is required. Missing confidence is not a not-found signal, and Box confidence is not a presence probability. Use a companion Noul when target presence matters, and tune image thresholds on representative examples rather than assuming a universal cutoff.
++
+ ## Gates
+
+ ```bash
+@@ -38,14 +42,14 @@ else:
+     human_review(outcome.result)
+ ```
+
+-Both gates consume the same Choice/Score `confidence` signal. Neither treats that signal as a correctness probability, and a rejected Python outcome still preserves the complete result for review. `require_probability()` is a separate policy for a Noul probability of true.
++Choice, Score, and Box confidence are Jev-supplied signals, not probabilities that an answer is correct. Box gates reject missing confidence. `require_probability()` is separate and applies to a Noul probability of true.
+
+ A threshold is invocation policy, not a universal Jev recommendation. Different actions
+ have different consequences. Keep thresholds at the call site until a deliberate policy
+ and outcome abstraction exists. pyjev does not add `min_confidence` to `.pyjev.toml` in
+ this pass, and it does not invent a default threshold.
+
+-Noul returns a probability of true and does not expose the Choice/Score confidence gate.
++Noul returns a probability of true and does not expose the Choice/Score/Box confidence gate.
+ Choose and document an application policy explicitly when using Noul.
+
+ The numeric exit codes are part of pyjev's CLI contract, not a Jev or cross-tool
+diff --git a/docs/examples.md b/docs/examples.md
+index 8604f6e..efc2693 100644
+--- a/docs/examples.md
++++ b/docs/examples.md
+@@ -50,6 +50,22 @@ The default threshold is a demo application policy, not a Jev correctness guaran
+
+ The top-N display is deterministic Python over Jev's preserved probability distribution; it is not a second model call.
+
++## Structured decisions
++
++`structured_decisions.py` demonstrates Noul, Choice, and Score in one named bundle with structured question, criteria, option, and level content. It is a pure-text example; it requires TypeSafe credentials to execute.
++
++```bash
++python examples/structured_decisions.py
++```
++
++## Box localization
++
++`image_localization.py` executes a named Box/Noul bundle with explicit `images=True`. It prints normalized coordinates and can convert them to pixel edges when dimensions are supplied. Box and image inputs are experimental upstream. A companion Noul provides a separate presence judgment; the example defines no universal threshold and writes no crops or files.
++
++```bash
++python examples/image_localization.py path/to/photo.jpg
++```
++
+ ## Image inspection
+
+ `image_inspection.py` demonstrates an inline SDK `Image` in structured state and a pyjev Choice with the required experimental opt-in.
+diff --git a/docs/getting-started.md b/docs/getting-started.md
+index ae9bfd4..e9f0809 100644
+--- a/docs/getting-started.md
++++ b/docs/getting-started.md
+@@ -131,7 +131,7 @@ with Jev(images=True) as jev:
+     )
+ ```
+
+-Image requests require `typesafe-sdk>=0.7.5` and send the image to the configured API. See [Image inputs](images.md) for named assets, current upstream limits, and data-handling guidance.
++Image requests require `typesafe-sdk>=0.7.6` and send the image to the configured API. See [Image inputs](images.md) for named assets, current upstream limits, and data-handling guidance.
+
+ ## When to use a direct primitive
+
+diff --git a/docs/images.md b/docs/images.md
+index 9905f29..bbe799d 100644
+--- a/docs/images.md
++++ b/docs/images.md
+@@ -8,7 +8,7 @@ If `images=True` is omitted, an image-bearing request may be rejected by the API
+
+ ## Installation and image construction
+
+-Image support requires `typesafe-sdk>=0.7.5`. Passing a path or bytes does not require an optional dependency:
++Image support requires `typesafe-sdk>=0.7.6`. Passing a path or bytes does not require an optional dependency:
+
+ ```python
+ from pathlib import Path
+@@ -21,7 +21,7 @@ photo = Image(Path("photo.jpg"))
+ The SDK also provides `Image.from_base64(...)`. `Image.from_pil(...)` is available when Pillow is installed through the optional SDK extra:
+
+ ```bash
+-pip install 'typesafe-sdk[pil]>=0.7.5,<1'
++pip install 'typesafe-sdk[pil]>=0.7.6,<1'
+ ```
+
+ Pillow is not a pyjev or base SDK dependency.
+@@ -98,6 +98,39 @@ question = "Does the product in `returned` match <catalog-photo>?"
+
+ Supply the actual SDK `Image` in `assets=` at execution time. Do not place binary data or base64 image blobs in decision TOML. `assets=` is available on the sync and native async decision methods; see [Python API](python-api.md).
+
++## Box localization
++
++`Jev.box(...)` localizes one target in an image and returns a `BoxResult`. Its `box` and `value` mappings contain normalized `top`, `bottom`, `left`, and `right` edge fractions from 0 through 1 relative to the source image.
++
++```python
++from pathlib import Path
++from pyjev import Image, Jev
++
++with Jev(images=True) as jev:
++    result = jev.box(
++        {"target": "coffee mug", "image": "photo"},
++        state={"photo": Image(Path("kitchen.jpg"))},
++    )
++```
++
++Multiply horizontal coordinates by the image width and vertical coordinates by its height when pixel edges are needed:
++
++```python
++box = result.box
++pixels = (
++    round(box["left"] * width),
++    round(box["top"] * height),
++    round(box["right"] * width),
++    round(box["bottom"] * height),
++)
++```
++
++Box always returns one box for a target and does not return a separate not found result. For several known targets, use multiple Box questions in one bundle, with one target per question. If presence matters, add a companion Noul to the same `BundleDecision`, then interpret the Noul probability and Box coordinates separately in application policy. No universal presence or confidence threshold is provided. Box confidence is separate from coordinates and may be `None`.
++
++Box instructions can be structured objects, for example `{"target": "mug", "image": "photo"}`. Named Box decisions and offline compilation are supported; provide runtime images through `state` or `assets=` and call `Jev(images=True)` or `AsyncJev(images=True)` for live requests. The bundled `examples/image_localization.py` demonstrates a named Box/Noul decision and optional coordinate conversion. The CLI does not upload images or execute live Box requests.
++
++Box and image behavior are experimental upstream. TypeSafe's official SDK continues to own question schemas, image assets, serialization, and transport. Do not implement image encoding or create output crops as part of a Box call.
++
+ ## Text interpolation with `attach_assets`
+
+ For advanced string interpolation, use the SDK client's `attach_assets` context manager. Direct structured placement is simpler and preferred:
+diff --git a/docs/index.md b/docs/index.md
+index 0f0d82b..0c74226 100644
+--- a/docs/index.md
++++ b/docs/index.md
+@@ -66,6 +66,7 @@ abstraction.
+ getting-started
+ why-pyjev
+ concepts
++structured-content
+ recipes
+ python-api
+ images
+@@ -89,6 +90,7 @@ changelog
+ - [Decision patterns](patterns.md)
+ - [Python API](python-api.md)
+ - [Image inputs](images.md)
++- [Structured question content](structured-content.md)
+ - [Semantic recipes](recipes.md)
+ - [CLI and exit codes](cli.md)
+ - [Confidence policy](confidence.md)
+diff --git a/docs/named-decisions.md b/docs/named-decisions.md
+index da7178f..6e615f9 100644
+--- a/docs/named-decisions.md
++++ b/docs/named-decisions.md
+@@ -38,6 +38,46 @@ levels = ["Can wait", "Normal", "Urgent", "Critical"]
+ Noul uses `true` and `false` criteria. Choice requires 2–255 options; Score requires
+ 2–10 ordered levels. Unknown fields and invalid criteria are rejected before API access.
+
++## Structured questions and Box
++
++The `question` field may be a string, object, or array. Structured content is passed to the official SDK as `instructions`; it is not formatted into a prompt string. Choice option values and Noul criteria become SDK `criteria`, while Score `levels` remain ordered criteria. Schema version 1 and existing string questions remain valid.
++
++```toml
++[decision.sender-check]
++type = "noul"
++question = { task = "Check sender identity", compare = ["sender.name", "sender.email"] }
++
++[decision.sender-check.true]
++definition = "The claimed sender identity conflicts with the email domain"
++
++[decision.route]
++type = "choice"
++question = { task = "Choose a team", consider = ["subject", "body"] }
++
++[decision.route.options.billing]
++covers = ["invoice", "refund"]
++
++[decision.urgency]
++type = "score"
++question = { task = "Rate impact", consider = ["blocked_work", "customer_impact"] }
++levels = [
++  { label = "routine", definition = "Normal handling" },
++  { label = "urgent", definition = "Work is blocked" },
++]
++```
++
++Box can also use structured instructions:
++
++```toml
++[decision.find-logo]
++type = "box"
++question = { target = "logo", image = "photo" }
++```
++
++`decision show --json`, `decision validate`, and `decision compile` inspect Box contracts offline. Live Box execution is available through the Python API only and requires `Jev(images=True)` or `AsyncJev(images=True)` with an SDK `Image` in state or an SDK asset. The CLI does not upload images.
++
++TOML contracts must remain JSON-compatible and cannot hold runtime SDK `Image` objects or image bytes. Use textual placeholders and provide actual image values through `state` or `assets=` at execution time. Object key order does not change a declaration fingerprint; array order does. See [Structured question content](structured-content.md) and [Image inputs](images.md) for details.
++
+ ## Bundles
+
+ A bundle asks several independent typed questions about one state in one SDK request:
+diff --git a/docs/patterns.md b/docs/patterns.md
+index 19b0a45..1872be9 100644
+--- a/docs/patterns.md
++++ b/docs/patterns.md
+@@ -84,10 +84,7 @@ weights = {
+     "generalist": 0.10,
+ }
+
+-composite = sum(
+-    weights[name] * result.answers[name].value / (len(result.answers[name].legend) - 1)
+-    for name in weights
+-)
++composite = sum(weights[name] * result.answers[name].value / (len(result.answers[name].legend) - 1) for name in weights)
+ ```
+
+ `ScoreResult.value` is the probability-weighted position over the ordered
+@@ -102,9 +99,7 @@ policies without changing the atomic Jev questions.
+
+ ## Confidence-gated routing
+
+-`ChoiceResult.confidence` and `ScoreResult.confidence` are preserved separately
+-from the selected value and probability distribution. Use the signal for the
+-specific action being considered, with thresholds appropriate to that action:
++`ChoiceResult.confidence` and `ScoreResult.confidence` are preserved separately from the selected value and probability distribution. `BoxResult.confidence` is separate from its normalized coordinates and may be `None`; use a companion Noul when the policy needs a target-presence probability. Use confidence only for the specific action being considered, with thresholds appropriate to that action.
+
+ ```python
+ result = jev.decide("banking-intent", state=command)
+@@ -119,11 +114,7 @@ else:
+     ask_user_to_confirm()
+ ```
+
+-Confidence is not a correctness probability. It is a model signal that the
+-caller may use as part of an explicit policy. The CLI exposes
+-`--min-confidence` for direct Choice and Score decisions and named primitive
+-decisions. Python policy is the right place for different thresholds per
+-consequence.
++Confidence is not a correctness probability. It is a model signal that the caller may use as part of an explicit policy. The CLI exposes `--min-confidence` for direct Choice and Score decisions and named primitive decisions. Python `require_confidence` also accepts Box results, but rejects missing Box confidence. Keep thresholds in application code and select them for the consequence.
+
+ ### Result-pipeline form
+
+@@ -145,7 +136,7 @@ This is an ergonomic alternative to the explicit `if` form above. It does not ma
+ Bundles deliberately have no aggregate confidence. A bundle may contain a
+ high-confidence intent, a low-confidence severity, and another signal with a
+ different consequence. Gate the child result that controls the action instead
+-of inventing one bundle threshold. A `NoulResult` also has no Choice or Score
++of inventing one bundle threshold. A `NoulResult` also has no Choice, Score, or Box
+ confidence field; use its explicit probability value when that is the relevant
+ policy signal.
+
+diff --git a/docs/python-api.md b/docs/python-api.md
+index c08c701..3fc37e4 100644
+--- a/docs/python-api.md
++++ b/docs/python-api.md
+@@ -20,9 +20,15 @@ The context manager closes clients created by `Jev`.
+ - `jev.choice(...)` accepts a mapping of labels to criteria or a sequence of labels.
+ - `jev.score(...)` accepts 2–10 ordered levels.
+
++- `Jev.box(...)` and native `AsyncJev.box(...)` return `BoxResult` with normalized coordinates and nullable confidence. Box requests require explicit image opt-in.
++
+ All validation happens before the SDK call. Results preserve uncertainty instead of
+ collapsing to a scalar convenience value.
+
++## Content types
++
++Public annotations reuse the official SDK aliases. `Content` represents text, JSON-like objects and arrays, and SDK assets such as `Image`; `JSONContent` is the corresponding asset-free JSON form. `ContentValue` and `JSONValue` describe nested values. pyjev re-exports these aliases instead of defining a competing recursive type. See [Structured question content](structured-content.md) for supported fields and named TOML examples.
++
+ ## In-memory decisions
+
+ The same typed decision declarations used by named contracts can be assembled at runtime. They are public constructors and can be evaluated without writing a `.pyjev.toml` file:
+@@ -42,7 +48,7 @@ with Jev(model="jev-latest") as jev:
+     result = jev.evaluate(decision, state={"message": "Checkout failed; please refund me."})
+ ```
+
+-`Jev.evaluate()` and `AsyncJev.evaluate()` accept `NoulDecision`, `ChoiceDecision`, `ScoreDecision`, and `BundleDecision`. Explicit `model=` overrides the declaration's model; otherwise the declaration model is used. A bundle shares one request and returns the usual typed child results in a `BundleResult`. Child model overrides are not allowed, matching named bundle rules. Constructing and locally validating decisions does not resolve credentials or make a request. `decide()` remains the convenient interface for declarations stored in `.pyjev.toml`.
++`Jev.evaluate()` and `AsyncJev.evaluate()` accept `NoulDecision`, `ChoiceDecision`, `ScoreDecision`, `BoxDecision`, and `BundleDecision`. Explicit `model=` overrides the declaration's model; otherwise the declaration model is used. A bundle shares one request and returns the usual typed child results in a `BundleResult`. Child model overrides are not allowed, matching named bundle rules. Constructing and locally validating decisions does not resolve credentials or make a request. `decide()` remains the convenient interface for declarations stored in `.pyjev.toml`.
+
+ ## Named decisions
+
+@@ -55,7 +61,7 @@ rules are described in [Named decisions](named-decisions.md).
+
+ ## Image inputs (experimental)
+
+-pyjev re-exports the official SDK `Image` class. Image support requires `typesafe-sdk>=0.7.5` and explicit `images=True`; TypeSafe currently describes it as dreamer-ready and experimental. When enabled, pyjev sends the required image opt-in header on every System One request. Inline `Image` objects in state, instructions, and criteria are passed to the SDK unchanged.
++pyjev re-exports the official SDK `Image` class. Image support requires `typesafe-sdk>=0.7.6` and explicit `images=True`; TypeSafe currently describes it as dreamer-ready and experimental. When enabled, pyjev sends the required image opt-in header on every System One request. Inline `Image` objects in state, instructions, and criteria are passed to the SDK unchanged.
+
+ ```python
+ from pathlib import Path
+@@ -122,6 +128,7 @@ Use `jev.client` for SDK operations outside pyjev's higher-level surface, or inj
+ Use `.value`, `.confidence`, `.probabilities`, and `.legend` as applicable. Every result
+ also preserves model, usage, raw answer data, and request ID. `NoulResult.value` remains
+ the raw probability of true.
++`BoxResult.value` and `.box` expose normalized edge coordinates; its confidence may be `None`.
+
+ ## Result pipelines
+
+@@ -143,7 +150,7 @@ else:
+     human_review(outcome.result)
+ ```
+
+-`answer(name)` selects the exact typed child from a `BundleResult`. Confidence gates accept only `ChoiceResult` and `ScoreResult`, and preserve the complete result in either an `Accepted` or `Rejected` outcome. A rejected outcome has no `.value` attribute, so a below-threshold result cannot be mistaken for permission to act.
++`answer(name)` selects the exact typed child from a `BundleResult`. Confidence gates accept `ChoiceResult`, `ScoreResult`, and `BoxResult`, and preserve the complete result in either an `Accepted` or `Rejected` outcome. A rejected outcome has no `.value` attribute, so a below-threshold result cannot be mistaken for permission to act.
+
+ For `NoulResult`, use the separate probability policy:
+
+@@ -153,7 +160,7 @@ from pyjev.pipeline import require_probability
+ outcome = result | require_probability(at_least=0.80)
+ ```
+
+-Thresholds are inclusive and must be finite values from 0 through 1. Choice and Score confidence is a Jev-supplied signal, not the probability that an answer is correct. The same local pipeline works after either synchronous or asynchronous evaluation.
++Thresholds are inclusive and must be finite values from 0 through 1. Choice, Score, and Box confidence is a Jev-supplied signal, not the probability that an answer is correct. Box confidence is distinct from its coordinates and may be `None`; a minimum-confidence gate rejects a missing value. The same local pipeline works after either synchronous or asynchronous evaluation.
+
+ ## Async API
+
+diff --git a/docs/structured-content.md b/docs/structured-content.md
+new file mode 100644
+index 0000000..b56607b
+--- /dev/null
++++ b/docs/structured-content.md
+@@ -0,0 +1,99 @@
++# Structured question content
++
++TypeSafe primitives accept more than prose strings. Question instructions, option criteria, and rubrics can be JSON-like objects and arrays. pyjev preserves those values as structure in direct Python calls, named contracts, compiled requests, and fingerprints. Structure changes how a question is described, not the primitive's result type.
++
++The official [`typesafe-sdk` Advanced: structure documentation](https://docs.typesafe.ai/primitives/advanced) defines the upstream behavior. The SDK owns question models, validation, serialization, assets, and transport. pyjev re-exports the SDK's `Content`, `ContentValue`, `JSONContent`, and `JSONValue` aliases without creating a second recursive content type.
++
++`Content` includes text, mappings, arrays, and SDK assets such as `Image`. `JSONContent` is the asset-free JSON form. Named `.pyjev.toml` contracts use JSON-compatible values, not runtime SDK objects or image bytes.
++
++## Where structure is accepted
++
++| Primitive field                  | Structured content                                  |
++| -------------------------------- | --------------------------------------------------- |
++| Noul question/instructions       | String, object, or array                            |
++| Noul `true` and `false` criteria | String, object, or array                            |
++| Choice question/instructions     | String, object, or array                            |
++| Choice option criteria           | String, object, or array                            |
++| Score question/instructions      | String, object, or array                            |
++| Score level criteria             | String, object, or array, subject to SDK validation |
++| Box question/instructions        | String, object, or array                            |
++
++A structured Choice still returns `ChoiceResult`, a Score returns `ScoreResult`, a Noul returns `NoulResult`, and a Box returns `BoxResult`.
++
++## Direct Python API
++
++Pass mappings and sequences directly. Do not stringify them into a prompt:
++
++```python
++from pyjev import Jev
++
++question = {
++    "task": "Route the ticket",
++    "fields": ["subject", "body"],
++}
++criteria = {
++    "billing": {"covers": ["invoice", "charge", "refund"]},
++    "engineering": {"covers": ["bug", "technical failure"]},
++}
++
++with Jev() as jev:
++    result = jev.choice(question, state=ticket, choices=criteria)
++```
++
++The same applies to Noul criteria, Score levels, and Box instructions. Synchronous and native asynchronous methods preserve supported structures. For images inside `Content`, use SDK `Image` values with explicit `images=True`; see [Image inputs](images.md).
++
++## Named decisions in TOML
++
++The `question` field in `.pyjev.toml` may be a string, an inline object, an array, or a nested table. It compiles to TypeSafe's `instructions` field. Choice option values compile to `criteria`; Noul `true` and `false` values also compile to criteria; Score levels become ordered criteria.
++
++```toml
++[pyjev]
++schema = 1
++
++[decision.ticket-route]
++type = "choice"
++question = { task = "Route the ticket", fields = ["subject", "body"] }
++
++[decision.ticket-route.options.billing]
++covers = ["invoice", "charge", "refund"]
++
++[decision.ticket-route.options.engineering]
++covers = ["bug", "technical failure"]
++```
++
++Objects keep their keys and arrays keep their order through `decision show --json` and `decision compile`. Existing string declarations and schema version 1 remain supported.
++
++TOML has no native `null` value. Omit optional values where the contract allows it. Do not use magic strings to represent null. Named contracts are source-controlled JSON-compatible data and cannot contain an in-memory SDK `Image` or image bytes. Use textual placeholders in the contract and supply SDK images through `state` or `assets=` at runtime.
++
++## Objects and arrays
++
++Use an object when named fields and relationships help explain the judgment. Use an array when order or membership matters. pyjev preserves object content and sorts object keys only for deterministic fingerprinting. Array order remains significant. Prefer a short prose string when structure would add ceremony without making the contract clearer.
++
++## Box instructions and images
++
++Box is an image-localization primitive, not a new structured-content primitive. Its instructions can also be structured:
++
++```python
++from pathlib import Path
++from pyjev import Image, Jev
++
++with Jev(images=True) as jev:
++    result = jev.box(
++        {"target": "coffee mug", "image": "photo"},
++        state={"photo": Image(Path("kitchen.jpg"))},
++    )
++```
++
++Box and image inputs are experimental upstream. Box requests require explicit `images=True`. Box returns one set of normalized coordinates and has no explicit not-found result. When target presence matters, pair Box with a Noul question in a bundle. The CLI supports offline inspection and compilation of Box decisions, but it does not upload images or execute live Box requests.
++
++## Fingerprints and review
++
++A compiled decision fingerprint covers the validated declaration, including nested structured content. Mapping key order does not change the fingerprint, while array order does. Runtime state, credentials, configuration paths, SDK `Image` objects, and runtime `assets=` bytes are not part of the named declaration fingerprint. Review the compiled request and fingerprint before execution when the contract is consequential.
++
++## Validation boundaries
++
++pyjev validates its source-controlled boundary: supported root shapes, JSON/TOML compatibility, declaration fields, and cardinality. It does not duplicate TypeSafe's complete primitive schemas. Official SDK question constructors remain the final primitive-schema validator, and the SDK remains responsible for serialization and request behavior.
++
++## When plain strings are better
++
++Do not turn every one-line question into an object because the API allows it. Structure is useful when labels, fields, or relationships matter and should remain visible in source control. Use concise prose when it communicates the contract more clearly.
+diff --git a/docs/why-pyjev.md b/docs/why-pyjev.md
+index 4a6fc2e..ceb1192 100644
+--- a/docs/why-pyjev.md
++++ b/docs/why-pyjev.md
+@@ -87,7 +87,7 @@ version-controlled project identity that can be inspected and reused.
+
+ ### Give it a stable identity
+
+-Named Noul, Choice, Score, and bundle decisions live in `.pyjev.toml`. A stable
++Named Noul, Choice, Score, Box, and bundle decisions live in `.pyjev.toml`. A stable
+ name makes the declaration reusable and reviewable instead of repeating its
+ criteria in each call site.
+
+@@ -210,9 +210,9 @@ Use `typesafe-sdk` directly when:
+ - low-level SDK request controls are needed; or
+ - a TypeSafe primitive is not exposed by pyjev.
+
+-For example, the current pyjev decision model covers Noul, Choice, Score, and
+-bundles of those primitives, not TypeSafe's `Box` primitive. Direct SDK use is an
+-expected escape hatch, not a missing promise of SDK parity.
++pyjev supports Noul, Choice, Score, and Box in its Python decision and result model, and preserves structured content in direct calls and named contracts. Structured named decisions add source-control identity, offline validation, deterministic fingerprints, and the ability to reuse the same object structure from Python and shell without ad-hoc JSON-string prompt formatting.
++
++Use `typesafe-sdk` directly for custom transport or retry controls, custom response models, or a lower-level feature not represented by pyjev. pyjev does not promise immediate parity with every future SDK feature. The official client remains available through `jev.client`, and callers can inject their own SDK client.
+
+ ## What pyjev deliberately does not own
+
+diff --git a/examples/.pyjev.toml b/examples/.pyjev.toml
+index b54412e..4dfcaab 100644
+--- a/examples/.pyjev.toml
++++ b/examples/.pyjev.toml
+@@ -273,3 +273,56 @@ question = "This message is sarcastic or intentionally ironic."
+ [decision.emoji-jev.questions.joke]
+ type = "noul"
+ question = "This message is intended as a joke or humorous remark."
++
++
++[decision.structured-ticket]
++type = "bundle"
++
++[decision.structured-ticket.questions.sender-conflict]
++type = "noul"
++
++[decision.structured-ticket.questions.sender-conflict.question]
++task = "Check whether the claimed sender identity conflicts with the email domain"
++compare = ["sender.display_name", "sender.email"]
++
++[decision.structured-ticket.questions.sender-conflict.true]
++definition = "The claimed organization materially conflicts with the domain"
++
++[decision.structured-ticket.questions.sender-conflict.false]
++definition = "The identity and domain are consistent or neutral"
++
++[decision.structured-ticket.questions.route]
++type = "choice"
++
++[decision.structured-ticket.questions.route.question]
++task = "Select the owning support team"
++consider = ["subject", "body", "requested_action"]
++
++[decision.structured-ticket.questions.route.options.billing]
++covers = ["invoice", "charge", "refund"]
++
++[decision.structured-ticket.questions.route.options.engineering]
++covers = ["bug", "technical failure", "broken behavior"]
++
++[decision.structured-ticket.questions.route.options.sales]
++covers = ["pricing", "purchase", "procurement"]
++
++[decision.structured-ticket.questions.urgency]
++type = "score"
++question = { task = "Rate urgency", consider = ["impact", "blocked_work"] }
++levels = [
++  { label = "routine", definition = "Normal queue handling" },
++  { label = "important", definition = "Needs timely attention" },
++  { label = "critical", definition = "Work is blocked or impact is immediate" },
++]
++
++[decision.mug-localization]
++type = "bundle"
++
++[decision.mug-localization.questions.visible]
++type = "noul"
++question = { task = "Determine whether the target is visible", target = "coffee mug", image = "photo" }
++
++[decision.mug-localization.questions.location]
++type = "box"
++question = { task = "Locate the target", target = "coffee mug", image = "photo" }
+diff --git a/examples/README.md b/examples/README.md
+index d9cd991..0595270 100644
+--- a/examples/README.md
++++ b/examples/README.md
+@@ -15,6 +15,8 @@ python examples/semantic_linter.py pyjev/client.py
+ python examples/semantic_linter.py pyjev --threshold 0.80
+ python examples/semantic_linter.py pyjev/client.py --show-all
+ python examples/semantic_linter.py pyjev/client.py --json
++python examples/structured_decisions.py
++python examples/image_localization.py path/to/photo.jpg
+ python examples/image_inspection.py path/to/photo.jpg
+ python examples/image_compare.py path/to/candidate.jpg path/to/reference.jpg
+ ```
+@@ -84,6 +86,22 @@ The examples intentionally do not assert specific Jev outputs. Model results and
+ confidence values may vary. The shared `.pyjev.toml` also contains named Noul and
+ Choice declarations for CLI experiments.
+
++## Structured decisions
++
++`structured_decisions.py` runs a pure-text named bundle whose Noul question and criteria, Choice question and options, and Score rubric contain JSON/TOML objects. pyjev preserves the nested data as question structure rather than formatting it into prompt prose. The contract stays in schema 1 and thresholds remain application policy.
++
++```bash
++python examples/structured_decisions.py
++```
++
++## Box localization
++
++`image_localization.py` runs a named bundle containing Box and a companion Noul presence question. It prints normalized coordinates and optional pixel edges without cropping or writing files. Box and image support are experimental upstream, require `images=True`, and send the supplied image to the configured API. Box has no not-found result, and this example supplies no universal presence or confidence threshold.
++
++```bash
++python examples/image_localization.py path/to/photo.jpg --width 1920 --height 1080
++```
++
+ ## Image inputs (experimental)
+
+ `image_inspection.py` accepts one PNG or JPEG path and demonstrates an inline SDK `Image` in structured state. `image_compare.py` accepts candidate and reference paths and demonstrates a named `assets=` reference. Both examples explicitly opt in with `Jev(images=True)`. They send the supplied image data to the configured TypeSafe-compatible API, so they require API credentials and are not offline examples. A visual match is not authentication, identity proof, or authorization.
+diff --git a/examples/image_compare.py b/examples/image_compare.py
+index 6474378..9bd94e4 100644
+--- a/examples/image_compare.py
++++ b/examples/image_compare.py
+@@ -1,4 +1,7 @@
+-"""Compare a candidate image with a caller-supplied named reference image."""
++"""Compare a candidate image with a caller-supplied named reference image.
++
++For Box localization and a separate presence judgment, see image_localization.py.
++"""
+
+ from __future__ import annotations
+
+diff --git a/examples/image_inspection.py b/examples/image_inspection.py
+index 44128c1..7177f84 100644
+--- a/examples/image_inspection.py
++++ b/examples/image_inspection.py
+@@ -1,4 +1,7 @@
+-"""Classify the primary subject in a caller-supplied image."""
++"""Classify the primary subject in a caller-supplied image.
++
++For localization and a companion presence judgment, see image_localization.py.
++"""
+
+ from __future__ import annotations
+
+diff --git a/examples/image_localization.py b/examples/image_localization.py
+new file mode 100644
+index 0000000..61f5b5b
+--- /dev/null
++++ b/examples/image_localization.py
+@@ -0,0 +1,51 @@
++"""Locate a target in an image and ask a companion question about its presence."""
++
++from __future__ import annotations
++
++import argparse
++from pathlib import Path
++
++from pyjev import Image, Jev
++
++CONFIG = Path(__file__).with_name(".pyjev.toml")
++
++
++def parse_args() -> argparse.Namespace:
++    parser = argparse.ArgumentParser(description=__doc__)
++    parser.add_argument("image", type=Path, help="path to a PNG or JPEG image")
++    parser.add_argument("--width", type=int, help="optional source image width in pixels")
++    parser.add_argument("--height", type=int, help="optional source image height in pixels")
++    return parser.parse_args()
++
++
++def main() -> None:
++    args = parse_args()
++    if (args.width is None) != (args.height is None):
++        raise SystemExit("--width and --height must be supplied together")
++
++    with Jev(images=True) as jev:
++        result = jev.decide(
++            "mug-localization",
++            state={"photo": Image(args.image)},
++            config=CONFIG,
++        )
++
++    presence = result.answers["visible"]
++    location = result.answers["location"]
++    print("presence probability:", presence.value)
++    print("normalized box:", location.box)
++    print("box confidence:", location.confidence)
++    if args.width is not None and args.height is not None:
++        box = location.box
++        pixels = (
++            round(box["left"] * args.width),
++            round(box["top"] * args.height),
++            round(box["right"] * args.width),
++            round(box["bottom"] * args.height),
++        )
++        print("pixel edges (left, top, right, bottom):", pixels)
++    print("A Box result is not a not-found signal. Interpret the companion Noul in application policy.")
++
++
++if __name__ == "__main__":
++    main()
+diff --git a/examples/structured_decisions.py b/examples/structured_decisions.py
+new file mode 100644
+index 0000000..8bb38ad
+--- /dev/null
++++ b/examples/structured_decisions.py
+@@ -0,0 +1,50 @@
++"""Run a pure-text bundle whose named questions preserve JSON structure."""
++
++from __future__ import annotations
++
++import argparse
++from pathlib import Path
++
++from pyjev import Jev
++
++CONFIG = Path(__file__).with_name(".pyjev.toml")
++
++
++def parse_args() -> argparse.Namespace:
++    parser = argparse.ArgumentParser(description=__doc__)
++    parser.add_argument("--subject", default="Refund requested after checkout error")
++    parser.add_argument("--body", default="The checkout failed twice and I was charged once.")
++    parser.add_argument("--sender-name", default="Northstar Supplies")
++    parser.add_argument("--sender-email", default="buyer@example.invalid")
++    parser.add_argument("--requested-action", default="Please refund the duplicate charge.")
++    return parser.parse_args()
++
++
++def main() -> None:
++    args = parse_args()
++    state = {
++        "subject": args.subject,
++        "body": args.body,
++        "sender": {"display_name": args.sender_name, "email": args.sender_email},
++        "requested_action": args.requested_action,
++    }
++
++    with Jev() as jev:
++        result = jev.decide("structured-ticket", state=state, config=CONFIG)
++
++    route = result.answers["route"]
++    sender_conflict = result.answers["sender-conflict"]
++    urgency = result.answers["urgency"]
++    print("route:", route.value)
++    print("route probabilities:", route.probabilities)
++    print("route confidence:", route.confidence)
++    print("sender-conflict probability:", sender_conflict.value)
++    print("urgency score:", urgency.value)
++    print("urgency confidence:", urgency.confidence)
++    print("model:", result.model)
++    print("request_id:", result.request_id)
++    print("Select thresholds and application actions in ordinary Python policy.")
++
++
++if __name__ == "__main__":
++    main()
+diff --git a/pyjev/__init__.py b/pyjev/__init__.py
+index d71c95e..3dd9eaa 100644
+--- a/pyjev/__init__.py
++++ b/pyjev/__init__.py
+@@ -8,15 +8,15 @@ from importlib.metadata import version as package_version
+ from pathlib import Path
+ from typing import Any
+
+-from typesafe_sdk import Asset, Image
++from typesafe_sdk import Asset, Content, ContentValue, Image, JSONContent, JSONValue
+
+ from .batch import BatchError, BatchRecord, BatchResult, BatchSummary, amap
+ from .client import AsyncJev, Jev
+ from .compile import CompiledDecision, compile_decision
+-from .decisions import BundleDecision, ChoiceDecision, Decision, NoulDecision, ScoreDecision
++from .decisions import BoxDecision, BundleDecision, ChoiceDecision, Decision, NoulDecision, ScoreDecision
+ from .output import OutputPathError, format_json, format_jsonl, format_markdown, pluck, validate_pluck_path
+ from .pipeline import Accepted, GateEvidence, Rejected
+-from .results import BundleResult, ChoiceResult, NoulResult, ScoreResult
++from .results import BoxCoordinates, BoxResult, BundleResult, ChoiceResult, NoulResult, ScoreResult
+
+ try:
+     from ._version import __version__
+@@ -36,13 +36,20 @@ def decide(
+     api_key: str | None = None,
+     images: bool = False,
+     assets: Mapping[str, Asset] | None = None,
+-) -> NoulResult | ChoiceResult | ScoreResult | BundleResult:
++) -> NoulResult | ChoiceResult | ScoreResult | BoxResult | BundleResult:
+     """Evaluate a named decision using a short-lived convenience client."""
+     with Jev(api_key=api_key, model=model, images=images) as jev:
+         return jev.decide(name, state=state, config=config, model=model, assets=assets)
+
+
+ __all__ = [
++    "BoxCoordinates",
++    "BoxDecision",
++    "BoxResult",
++    "Content",
++    "ContentValue",
++    "JSONContent",
++    "JSONValue",
+     "Accepted",
+     "amap",
+     "BatchError",
+diff --git a/pyjev/cli.py b/pyjev/cli.py
+index 20e5a9e..c770bb1 100644
+--- a/pyjev/cli.py
++++ b/pyjev/cli.py
+@@ -32,6 +32,7 @@ from .credentials import (
+     set_file_api_key,
+ )
+ from .decisions import (
++    BoxDecision,
+     BundleDecision,
+     DecisionConfigError,
+     NoulDecision,
+@@ -42,7 +43,7 @@ from .decisions import (
+ )
+ from .output import OutputPathError, format_json, validate_pluck_path
+ from .output import pluck as pluck_value
+-from .results import BundleResult, ChoiceResult, NoulResult, ScoreResult
++from .results import BoxResult, BundleResult, ChoiceResult, NoulResult, ScoreResult
+
+ EXIT_OK = 0
+ EXIT_RUNTIME_ERROR = 1
+@@ -50,7 +51,7 @@ EXIT_USAGE = 2
+ EXIT_CONFIDENCE = 3
+
+ T = TypeVar("T")
+-Result = BundleResult | NoulResult | ChoiceResult | ScoreResult
++Result = BundleResult | NoulResult | ChoiceResult | ScoreResult | BoxResult
+
+ app = typer.Typer(
+     no_args_is_help=True,
+@@ -423,6 +424,14 @@ def decide(
+         declaration = load_decision(name, config)
+     except DecisionConfigError as exc:
+         raise _parse_decision_error(exc) from exc
++    if isinstance(declaration, BoxDecision) or (
++        isinstance(declaration, BundleDecision)
++        and any(isinstance(child, BoxDecision) for child in declaration.questions.values())
++    ):
++        raise typer.BadParameter(
++            "Box decisions require image input and the experimental image opt-in.\n"
++            "Execute this decision through the Python API with Jev(images=True)."
++        )
+     if isinstance(declaration, (NoulDecision, BundleDecision)) and min_confidence is not None:
+         if isinstance(declaration, BundleDecision):
+             raise typer.BadParameter("--min-confidence is not valid for bundle decisions.")
+@@ -644,7 +653,10 @@ def decision_show(
+         if isinstance(decision, BundleDecision):
+             typer.echo(f"questions={','.join(decision.questions)}")
+         else:
+-            typer.echo(f"question={decision.question}")
++            if isinstance(decision.question, str):
++                typer.echo(f"question={decision.question}")
++            else:
++                typer.echo("question=" + format_json(decision.question, indent=None))
+
+
+ @decision_app.command("validate")
+@@ -703,6 +715,11 @@ def run(
+     if not isinstance(questions, dict) or not questions:
+         raise typer.BadParameter("'questions' must be a non-empty object.")
+
++    if any(isinstance(question, dict) and question.get("type") == "box" for question in questions.values()):
++        raise typer.BadParameter(
++            "Box questions require image input and the experimental image opt-in.\n"
++            "Execute this request through the Python API with Jev(images=True)."
++        )
+     result = _run_api(
+         lambda jev: jev.run(state=payload["state"], questions=questions),
+         model=payload.get("model"),
+diff --git a/pyjev/client.py b/pyjev/client.py
+index 397055c..07472fd 100644
+--- a/pyjev/client.py
++++ b/pyjev/client.py
+@@ -5,14 +5,30 @@ from __future__ import annotations
+ from collections.abc import Mapping, Sequence
+ from pathlib import Path
+ from types import TracebackType
+-from typing import Any, overload
+-
+-from typesafe_sdk import Asset, AsyncTypeSafeClient, Question, TypeSafeClient
+-
+-from .compile import build_choice, build_decision_questions, build_noul, build_score, validate_runtime_decision
++from typing import Any, Literal, overload
++
++from typesafe_sdk import Asset, AsyncTypeSafeClient, Box, Content, Question, TypeSafeClient
++
++from .compile import (
++    build_box,
++    build_choice,
++    build_decision_questions,
++    build_noul,
++    build_score,
++    validate_runtime_decision,
++)
+ from .credentials import get_api_key
+-from .decisions import BundleDecision, ChoiceDecision, Decision, NoulDecision, ScoreDecision, load_decision
+-from .results import BundleResult, ChoiceResult, NoulResult, PrimitiveResult, ScoreResult
++from .decisions import (
++    BoxDecision,
++    BundleDecision,
++    ChoiceDecision,
++    Decision,
++    NoulDecision,
++    PrimitiveDecision,
++    ScoreDecision,
++    load_decision,
++)
++from .results import BoxResult, BundleResult, ChoiceResult, NoulResult, PrimitiveResult, ScoreResult
+
+ _IMAGE_HEADERS = {"TypeSafe-Danger-Zone-Images": "true"}
+
+@@ -30,21 +46,43 @@ def _usage(response: Any) -> dict[str, Any]:
+     return response.usage.model_dump(mode="json")
+
+
++def _uses_box(decision: Decision) -> bool:
++    if isinstance(decision, BoxDecision):
++        return True
++    if isinstance(decision, BundleDecision):
++        return any(isinstance(child, BoxDecision) for child in decision.questions.values())
++    return False
++
++
++def _is_box_question(question: Question) -> bool:
++    return isinstance(question, Box) or (isinstance(question, Mapping) and question.get("type") == "box")
++
++
+ @overload
+-def _primitive_result(response: Any, name: str, decision: NoulDecision) -> NoulResult: ...
+ @overload
+-def _primitive_result(response: Any, name: str, decision: ChoiceDecision) -> ChoiceResult: ...
++def _primitive_result(response: Any, name: str, decision: NoulDecision | Literal["noul"]) -> NoulResult: ...
++
++
++@overload
++def _primitive_result(response: Any, name: str, decision: ChoiceDecision | Literal["choice"]) -> ChoiceResult: ...
++
++
+ @overload
+-def _primitive_result(response: Any, name: str, decision: ScoreDecision) -> ScoreResult: ...
++def _primitive_result(response: Any, name: str, decision: ScoreDecision | Literal["score"]) -> ScoreResult: ...
++
++
++@overload
++def _primitive_result(response: Any, name: str, decision: BoxDecision | Literal["box"]) -> BoxResult: ...
+
+
+ def _primitive_result(
+     response: Any,
+     name: str,
+-    decision: NoulDecision | ChoiceDecision | ScoreDecision,
++    decision: PrimitiveDecision | Literal["noul", "choice", "score", "box"],
+ ) -> PrimitiveResult:
+     request_id = _request_id(response)
+-    if isinstance(decision, NoulDecision):
++    kind = decision if isinstance(decision, str) else type(decision)
++    if kind in ("noul", NoulDecision):
+         answer = response.nouls[name]
+         return NoulResult(
+             value=answer.noul,
+@@ -53,7 +91,7 @@ def _primitive_result(
+             raw=answer.model_dump(mode="json"),
+             request_id=request_id,
+         )
+-    if isinstance(decision, ChoiceDecision):
++    if kind in ("choice", ChoiceDecision):
+         answer = response.choices[name]
+         return ChoiceResult(
+             value=answer.choice,
+@@ -64,6 +102,21 @@ def _primitive_result(
+             raw=answer.model_dump(mode="json"),
+             request_id=request_id,
+         )
++    if kind in ("box", BoxDecision):
++        answer = response.boxes[name]
++        return BoxResult(
++            value={
++                "top": answer.box.top,
++                "bottom": answer.box.bottom,
++                "left": answer.box.left,
++                "right": answer.box.right,
++            },
++            confidence=answer.confidence,
++            model=response.model,
++            usage=_usage(response),
++            raw=answer.model_dump(mode="json"),
++            request_id=request_id,
++        )
+     answer = response.scores[name]
+     return ScoreResult(
+         value=answer.score,
+@@ -109,7 +162,7 @@ class Jev:
+     def _system_one(
+         self,
+         *,
+-        state: Any,
++        state: Content,
+         questions: Mapping[str, Question],
+         model: str | None,
+         assets: Mapping[str, Asset] | None = None,
+@@ -121,6 +174,10 @@ class Jev:
+             kwargs["extra_headers"] = _IMAGE_HEADERS
+         return self._client.system_one(**kwargs)
+
++    def _require_box_images_enabled(self) -> None:
++        if not self._images:
++            raise ValueError("Box questions require Jev(images=True).")
++
+     @property
+     def client(self) -> TypeSafeClient:
+         """Return the underlying SDK client."""
+@@ -128,11 +185,11 @@ class Jev:
+
+     def ask(
+         self,
+-        question: Any,
++        question: Content,
+         *,
+-        state: Any,
+-        true: Any | None = None,
+-        false: Any | None = None,
++        state: Content,
++        true: Content | None = None,
++        false: Content | None = None,
+         model: str | None = None,
+         assets: Mapping[str, Asset] | None = None,
+     ) -> NoulResult:
+@@ -141,11 +198,11 @@ class Jev:
+
+     def noul(
+         self,
+-        question: Any,
++        question: Content,
+         *,
+-        state: Any,
+-        true: Any | None = None,
+-        false: Any | None = None,
++        state: Content,
++        true: Content | None = None,
++        false: Content | None = None,
+         model: str | None = None,
+         assets: Mapping[str, Asset] | None = None,
+     ) -> NoulResult:
+@@ -156,14 +213,14 @@ class Jev:
+             model=model,
+             assets=assets,
+         )
+-        return _primitive_result(response, "answer", NoulDecision("answer", str(question), true, false, model))
++        return _primitive_result(response, "answer", "noul")
+
+     def choice(
+         self,
+-        question: Any,
++        question: Content,
+         *,
+-        state: Any,
+-        choices: Mapping[str, Any | None] | Sequence[str],
++        state: Content,
++        choices: Mapping[str, Content | None] | Sequence[str],
+         model: str | None = None,
+         assets: Mapping[str, Asset] | None = None,
+     ) -> ChoiceResult:
+@@ -175,14 +232,14 @@ class Jev:
+             model=model,
+             assets=assets,
+         )
+-        return _primitive_result(response, "answer", ChoiceDecision("answer", str(question), criteria))
++        return _primitive_result(response, "answer", "choice")
+
+     def score(
+         self,
+-        question: Any,
++        question: Content,
+         *,
+-        state: Any,
+-        levels: Sequence[Any],
++        state: Content,
++        levels: Sequence[Content],
+         model: str | None = None,
+         assets: Mapping[str, Asset] | None = None,
+     ) -> ScoreResult:
+@@ -194,16 +251,34 @@ class Jev:
+             model=model,
+             assets=assets,
+         )
+-        return _primitive_result(response, "answer", ScoreDecision("answer", str(question), tuple(values)))
++        return _primitive_result(response, "answer", "score")
++
++    def box(
++        self,
++        question: Content | None,
++        *,
++        state: Content,
++        model: str | None = None,
++        assets: Mapping[str, Asset] | None = None,
++    ) -> BoxResult:
++        """Locate one target in image content using the experimental Box primitive."""
++        self._require_box_images_enabled()
++        response = self._system_one(
++            state=state,
++            questions={"answer": build_box(question)},
++            model=model,
++            assets=assets,
++        )
++        return _primitive_result(response, "answer", "box")
+
+     def evaluate(
+         self,
+         decision: Decision,
+         *,
+-        state: Any,
++        state: Content,
+         model: str | None = None,
+         assets: Mapping[str, Asset] | None = None,
+-    ) -> NoulResult | ChoiceResult | ScoreResult | BundleResult:
++    ) -> NoulResult | ChoiceResult | ScoreResult | BoxResult | BundleResult:
+         """Evaluate a validated in-memory typed decision declaration.
+
+         An explicit ``model`` overrides the declaration's model. A bundle is sent
+@@ -211,6 +286,8 @@ class Jev:
+         Decision construction and this method's local validation do not resolve
+         credentials; only the call to the underlying SDK performs I/O.
+         """
++        if _uses_box(decision):
++            self._require_box_images_enabled()
+         validate_runtime_decision(decision)
+         effective_model = model if model is not None else decision.model
+         questions = build_decision_questions(decision)
+@@ -230,11 +307,11 @@ class Jev:
+         self,
+         name: str,
+         *,
+-        state: Any,
++        state: Content,
+         config: str | Path | None = None,
+         model: str | None = None,
+         assets: Mapping[str, Asset] | None = None,
+-    ) -> NoulResult | ChoiceResult | ScoreResult | BundleResult:
++    ) -> NoulResult | ChoiceResult | ScoreResult | BoxResult | BundleResult:
+         """Evaluate a named primitive or bundle decision from TOML."""
+         decision = load_decision(name, config)
+         return self.evaluate(decision, state=state, model=model, assets=assets)
+@@ -243,7 +320,7 @@ class Jev:
+         self,
+         decision: BundleDecision,
+         *,
+-        state: Any,
++        state: Content,
+         model: str | None,
+         assets: Mapping[str, Asset] | None = None,
+     ) -> BundleResult:
+@@ -261,12 +338,14 @@ class Jev:
+     def run(
+         self,
+         *,
+-        state: Any,
++        state: Content,
+         questions: Mapping[str, Question],
+         model: str | None = None,
+         assets: Mapping[str, Asset] | None = None,
+     ) -> dict[str, Any]:
+         """Evaluate several independent SDK questions in one request."""
++        if any(_is_box_question(question) for question in questions.values()):
++            self._require_box_images_enabled()
+         response = self._system_one(state=state, questions=questions, model=model, assets=assets)
+         return response.model_dump(mode="json")
+
+@@ -325,7 +404,7 @@ class AsyncJev:
+     async def _system_one(
+         self,
+         *,
+-        state: Any,
++        state: Content,
+         questions: Mapping[str, Question],
+         model: str | None,
+         assets: Mapping[str, Asset] | None = None,
+@@ -337,6 +416,10 @@ class AsyncJev:
+             kwargs["extra_headers"] = _IMAGE_HEADERS
+         return await self._client.system_one(**kwargs)
+
++    def _require_box_images_enabled(self) -> None:
++        if not self._images:
++            raise ValueError("Box questions require AsyncJev(images=True).")
++
+     @property
+     def client(self) -> AsyncTypeSafeClient:
+         """Return the underlying native async SDK client."""
+@@ -344,11 +427,11 @@ class AsyncJev:
+
+     async def ask(
+         self,
+-        question: Any,
++        question: Content,
+         *,
+-        state: Any,
+-        true: Any | None = None,
+-        false: Any | None = None,
++        state: Content,
++        true: Content | None = None,
++        false: Content | None = None,
+         model: str | None = None,
+         assets: Mapping[str, Asset] | None = None,
+     ) -> NoulResult:
+@@ -357,11 +440,11 @@ class AsyncJev:
+
+     async def noul(
+         self,
+-        question: Any,
++        question: Content,
+         *,
+-        state: Any,
+-        true: Any | None = None,
+-        false: Any | None = None,
++        state: Content,
++        true: Content | None = None,
++        false: Content | None = None,
+         model: str | None = None,
+         assets: Mapping[str, Asset] | None = None,
+     ) -> NoulResult:
+@@ -372,14 +455,14 @@ class AsyncJev:
+             model=model,
+             assets=assets,
+         )
+-        return _primitive_result(response, "answer", NoulDecision("answer", str(question), true, false, model))
++        return _primitive_result(response, "answer", "noul")
+
+     async def choice(
+         self,
+-        question: Any,
++        question: Content,
+         *,
+-        state: Any,
+-        choices: Mapping[str, Any | None] | Sequence[str],
++        state: Content,
++        choices: Mapping[str, Content | None] | Sequence[str],
+         model: str | None = None,
+         assets: Mapping[str, Asset] | None = None,
+     ) -> ChoiceResult:
+@@ -391,14 +474,14 @@ class AsyncJev:
+             model=model,
+             assets=assets,
+         )
+-        return _primitive_result(response, "answer", ChoiceDecision("answer", str(question), criteria))
++        return _primitive_result(response, "answer", "choice")
+
+     async def score(
+         self,
+-        question: Any,
++        question: Content,
+         *,
+-        state: Any,
+-        levels: Sequence[Any],
++        state: Content,
++        levels: Sequence[Content],
+         model: str | None = None,
+         assets: Mapping[str, Asset] | None = None,
+     ) -> ScoreResult:
+@@ -410,21 +493,41 @@ class AsyncJev:
+             model=model,
+             assets=assets,
+         )
+-        return _primitive_result(response, "answer", ScoreDecision("answer", str(question), tuple(values)))
++        return _primitive_result(response, "answer", "score")
++
++    async def box(
++        self,
++        question: Content | None,
++        *,
++        state: Content,
++        model: str | None = None,
++        assets: Mapping[str, Asset] | None = None,
++    ) -> BoxResult:
++        """Locate one target in image content using the native async Box primitive."""
++        self._require_box_images_enabled()
++        response = await self._system_one(
++            state=state,
++            questions={"answer": build_box(question)},
++            model=model,
++            assets=assets,
++        )
++        return _primitive_result(response, "answer", "box")
+
+     async def evaluate(
+         self,
+         decision: Decision,
+         *,
+-        state: Any,
++        state: Content,
+         model: str | None = None,
+         assets: Mapping[str, Asset] | None = None,
+-    ) -> NoulResult | ChoiceResult | ScoreResult | BundleResult:
++    ) -> NoulResult | ChoiceResult | ScoreResult | BoxResult | BundleResult:
+         """Evaluate an in-memory decision using the native async SDK client.
+
+         An explicit ``model`` overrides the declaration's model. Independent bundle
+         questions share one SDK request and retain their primitive result types.
+         """
++        if _uses_box(decision):
++            self._require_box_images_enabled()
+         validate_runtime_decision(decision)
+         effective_model = model if model is not None else decision.model
+         questions = build_decision_questions(decision)
+@@ -444,11 +547,11 @@ class AsyncJev:
+         self,
+         name: str,
+         *,
+-        state: Any,
++        state: Content,
+         config: str | Path | None = None,
+         model: str | None = None,
+         assets: Mapping[str, Asset] | None = None,
+-    ) -> NoulResult | ChoiceResult | ScoreResult | BundleResult:
++    ) -> NoulResult | ChoiceResult | ScoreResult | BoxResult | BundleResult:
+         """Evaluate a named primitive or bundle asynchronously."""
+         decision = load_decision(name, config)
+         return await self.evaluate(decision, state=state, model=model, assets=assets)
+@@ -456,12 +559,14 @@ class AsyncJev:
+     async def run(
+         self,
+         *,
+-        state: Any,
++        state: Content,
+         questions: Mapping[str, Question],
+         model: str | None = None,
+         assets: Mapping[str, Asset] | None = None,
+     ) -> dict[str, Any]:
+         """Evaluate several SDK questions asynchronously in one request."""
++        if any(_is_box_question(question) for question in questions.values()):
++            self._require_box_images_enabled()
+         response = await self._system_one(state=state, questions=questions, model=model, assets=assets)
+         return response.model_dump(mode="json")
+
+diff --git a/pyjev/compile.py b/pyjev/compile.py
+index 3568830..8674f3c 100644
+--- a/pyjev/compile.py
++++ b/pyjev/compile.py
+@@ -7,20 +7,24 @@ from dataclasses import dataclass
+ from pathlib import Path
+ from typing import Any
+
+-from typesafe_sdk import Choice, Noul, NoulCriteria, Question, Score
++from typesafe_sdk import Box, Choice, Content, Noul, NoulCriteria, Question, Score
+
+ from .decisions import (
++    BoxDecision,
+     BundleDecision,
+     ChoiceDecision,
+     Decision,
+     NoulDecision,
+     ScoreDecision,
++    _is_json_content,
+     decision_spec_fingerprint,
+     load_decision,
+ )
+
+
+-def validate_choice_criteria(choices: Mapping[str, Any | None] | Sequence[str]) -> dict[str, Any | None]:
++def validate_choice_criteria(
++    choices: Mapping[str, Content | None] | Sequence[str],
++) -> dict[str, Content | None]:
+     """Normalize and validate Choice criteria before an SDK request."""
+     if isinstance(choices, Mapping):
+         criteria = dict(choices)
+@@ -37,7 +41,7 @@ def validate_choice_criteria(choices: Mapping[str, Any | None] | Sequence[str])
+     return criteria
+
+
+-def validate_score_levels(levels: Sequence[Any]) -> list[Any]:
++def validate_score_levels(levels: Sequence[Content]) -> list[Content]:
+     """Normalize and validate ordered Score levels before an SDK request."""
+     values = list(levels)
+     if not 2 <= len(values) <= 10:
+@@ -45,7 +49,12 @@ def validate_score_levels(levels: Sequence[Any]) -> list[Any]:
+     return values
+
+
+-def build_noul(question: Any, *, true: Any | None = None, false: Any | None = None) -> Noul:
++def build_noul(
++    question: Content | None,
++    *,
++    true: Content | None = None,
++    false: Content | None = None,
++) -> Noul:
+     """Build the official SDK Noul question used by live and compiled requests."""
+     criteria: NoulCriteria | None = None
+     if true is not None or false is not None:
+@@ -53,16 +62,24 @@ def build_noul(question: Any, *, true: Any | None = None, false: Any | None = No
+     return Noul(instructions=question, criteria=criteria)
+
+
+-def build_choice(question: Any, choices: Mapping[str, Any | None] | Sequence[str]) -> Choice:
++def build_choice(
++    question: Content | None,
++    choices: Mapping[str, Content | None] | Sequence[str],
++) -> Choice:
+     """Build the official SDK Choice question used by live and compiled requests."""
+     return Choice(instructions=question, criteria=validate_choice_criteria(choices))
+
+
+-def build_score(question: Any, levels: Sequence[Any]) -> Score:
++def build_score(question: Content | None, levels: Sequence[Content]) -> Score:
+     """Build the official SDK Score question used by live and compiled requests."""
+     return Score(instructions=question, criteria=validate_score_levels(levels))
+
+
++def build_box(question: Content | None) -> Box:
++    """Build the official SDK Box question used by live and compiled requests."""
++    return Box(instructions=question)
++
++
+ def build_question(decision: Decision) -> Question:
+     """Build the SDK question for a validated primitive decision declaration."""
+     if isinstance(decision, NoulDecision):
+@@ -71,6 +88,8 @@ def build_question(decision: Decision) -> Question:
+         return build_choice(decision.question, decision.options)
+     if isinstance(decision, ScoreDecision):
+         return build_score(decision.question, decision.levels)
++    if isinstance(decision, BoxDecision):
++        return build_box(decision.question)
+     raise TypeError(f"Unsupported decision type: {type(decision).__name__}")
+
+
+@@ -123,7 +142,7 @@ class CompiledDecision:
+
+ def _question_to_dict(question: Question) -> dict[str, Any]:
+     """Serialize either an SDK question model or its raw dictionary form."""
+-    if isinstance(question, (Noul, Choice, Score)):
++    if isinstance(question, (Noul, Choice, Score, Box)):
+         return question.model_dump(mode="json")
+     return dict(question)
+
+@@ -144,7 +163,7 @@ def validate_runtime_decision(decision: Decision) -> Decision:
+         for name, child in decision.questions.items():
+             if not isinstance(name, str) or not name.strip():
+                 raise ValueError("bundle question names must be nonempty strings")
+-            if not isinstance(child, (NoulDecision, ChoiceDecision, ScoreDecision)):
++            if not isinstance(child, (NoulDecision, ChoiceDecision, ScoreDecision, BoxDecision)):
+                 raise TypeError(f"unsupported decision type for bundle question {name!r}")
+             if child.name != name:
+                 raise ValueError(f"bundle question key {name!r} must match child decision name {child.name!r}")
+@@ -152,21 +171,33 @@ def validate_runtime_decision(decision: Decision) -> Decision:
+                 raise ValueError("child model overrides are not allowed in a bundle")
+             _validate_runtime_primitive(child)
+         return decision
+-    if not isinstance(decision, (NoulDecision, ChoiceDecision, ScoreDecision)):
++    if not isinstance(decision, (NoulDecision, ChoiceDecision, ScoreDecision, BoxDecision)):
+         raise TypeError(f"unsupported decision type: {type(decision).__name__}")
+     _validate_runtime_primitive(decision)
+     return decision
+
+
+-def _validate_runtime_primitive(decision: NoulDecision | ChoiceDecision | ScoreDecision) -> None:
++def _validate_runtime_primitive(decision: NoulDecision | ChoiceDecision | ScoreDecision | BoxDecision) -> None:
+     if not isinstance(decision.name, str) or not decision.name.strip():
+         raise ValueError("decision name must be a nonempty string")
+-    if not isinstance(decision.question, str) or not decision.question.strip():
+-        raise ValueError("decision question must be a nonempty string")
++    if not _is_json_content(decision.question):
++        raise ValueError("decision question must be JSON-compatible string, object, or array content")
+     if decision.model is not None and (not isinstance(decision.model, str) or not decision.model.strip()):
+         raise ValueError("decision model must be a nonempty string or None")
+-    # Constructing the SDK question performs the same local type/cardinality checks
+-    # as named decisions and never resolves credentials or performs network I/O.
++    if isinstance(decision, NoulDecision):
++        if not _is_json_content(decision.true, allow_none=True):
++            raise ValueError("decision true criterion must be JSON-compatible content or None")
++        if not _is_json_content(decision.false, allow_none=True):
++            raise ValueError("decision false criterion must be JSON-compatible content or None")
++    elif isinstance(decision, ChoiceDecision):
++        for description in decision.options.values():
++            if not _is_json_content(description, allow_none=True):
++                raise ValueError("decision option descriptions must be JSON-compatible content or None")
++    elif isinstance(decision, ScoreDecision):
++        for level in decision.levels:
++            if not _is_json_content(level):
++                raise ValueError("decision score levels must be JSON-compatible content")
++    # Constructing the SDK question performs primitive-specific schema checks locally.
+     build_question(decision)
+
+
+diff --git a/pyjev/decisions.py b/pyjev/decisions.py
+index a101e6c..51a929b 100644
+--- a/pyjev/decisions.py
++++ b/pyjev/decisions.py
+@@ -9,6 +9,8 @@ from dataclasses import dataclass
+ from pathlib import Path
+ from typing import Any, TypeAlias
+
++from typesafe_sdk import JSONContent
++
+ try:  # Python 3.11+
+     import tomllib
+ except ModuleNotFoundError:  # pragma: no cover - exercised on Python 3.10
+@@ -28,9 +30,9 @@ class NoulDecision:
+     """A named yes/no probability declaration."""
+
+     name: str
+-    question: str
+-    true: Any | None = None
+-    false: Any | None = None
++    question: JSONContent
++    true: JSONContent | None = None
++    false: JSONContent | None = None
+     model: str | None = None
+
+
+@@ -39,8 +41,8 @@ class ChoiceDecision:
+     """A named closed-set Choice declaration."""
+
+     name: str
+-    question: str
+-    options: dict[str, Any | None]
++    question: JSONContent
++    options: dict[str, JSONContent | None]
+     model: str | None = None
+
+
+@@ -49,12 +51,21 @@ class ScoreDecision:
+     """A named ordered Score declaration."""
+
+     name: str
+-    question: str
+-    levels: tuple[Any, ...]
++    question: JSONContent
++    levels: tuple[JSONContent, ...]
++    model: str | None = None
++
++
++@dataclass(frozen=True, slots=True)
++class BoxDecision:
++    """A named image localization declaration."""
++
++    name: str
++    question: JSONContent
+     model: str | None = None
+
+
+-PrimitiveDecision: TypeAlias = NoulDecision | ChoiceDecision | ScoreDecision
++PrimitiveDecision: TypeAlias = NoulDecision | ChoiceDecision | ScoreDecision | BoxDecision
+
+
+ @dataclass(frozen=True, slots=True)
+@@ -115,24 +126,42 @@ def _error(path: Path, name: str | None, field: str, message: str) -> DecisionCo
+     return DecisionConfigError(f"{path}: {target}: {field}: {message}")
+
+
+-def _json_compatible(value: Any) -> bool:
++def _is_json_content(value: Any, *, allow_none: bool = False) -> bool:
++    if value is None:
++        return allow_none
++    if not isinstance(value, (str, dict, list)):
++        return False
++    if isinstance(value, str) and not value.strip():
++        return False
+     try:
+-        json.dumps(value)
++        json.dumps(value, allow_nan=False)
+     except (TypeError, ValueError):
+         return False
+     return True
+
+
++def _json_content(
++    value: Any,
++    path: Path,
++    name: str,
++    field: str,
++    *,
++    allow_none: bool = False,
++) -> JSONContent | None:
++    if not _is_json_content(value, allow_none=allow_none):
++        raise _error(path, name, field, "must be JSON-compatible string, object, or array content")
++    return value
++
++
+ def _require_table(value: Any, path: Path, name: str | None, field: str) -> dict[str, Any]:
+     if not isinstance(value, dict):
+         raise _error(path, name, field, "expected a TOML table")
+     return value
+
+
+-def _question(table: dict[str, Any], path: Path, name: str) -> str:
+-    value = table.get("question")
+-    if not isinstance(value, str) or not value.strip():
+-        raise _error(path, name, "question", "must be a nonempty string")
++def _question(table: dict[str, Any], path: Path, name: str) -> JSONContent:
++    value = _json_content(table.get("question"), path, name, "question")
++    assert value is not None
+     return value
+
+
+@@ -153,22 +182,28 @@ def _check_fields(table: dict[str, Any], allowed: set[str], path: Path, name: st
+
+ def _parse_primitive(name: str, table: dict[str, Any], path: Path, *, allow_model: bool = True) -> PrimitiveDecision:
+     kind = table.get("type")
+-    if kind not in {"noul", "choice", "score"}:
+-        raise _error(path, name, "type", "must be exactly noul, choice, or score")
++    if kind not in {"noul", "choice", "score", "box"}:
++        raise _error(path, name, "type", "must be exactly noul, choice, score, or box")
+     if not allow_model and "model" in table:
+         raise _error(path, name, "model", "child model overrides are not allowed in a bundle")
+     question = _question(table, path, name)
+     model = _model(table, path, name) if allow_model else None
+
++    if kind == "box":
++        allowed = {"type", "question"}
++        if allow_model:
++            allowed.add("model")
++        _check_fields(table, allowed, path, name)
++        return BoxDecision(name=name, question=question, model=model)
++
+     if kind == "noul":
+         allowed = {"type", "question", "true", "false"}
+         if allow_model:
+             allowed.add("model")
+         _check_fields(table, allowed, path, name)
+-        for field in ("true", "false"):
+-            if field in table and not _json_compatible(table[field]):
+-                raise _error(path, name, field, "must be JSON-compatible")
+-        return NoulDecision(name=name, question=question, true=table.get("true"), false=table.get("false"), model=model)
++        true = _json_content(table["true"], path, name, "true", allow_none=True) if "true" in table else None
++        false = _json_content(table["false"], path, name, "false", allow_none=True) if "false" in table else None
++        return NoulDecision(name=name, question=question, true=true, false=false, model=model)
+
+     if kind == "choice":
+         allowed = {"type", "question", "options"}
+@@ -180,13 +215,17 @@ def _parse_primitive(name: str, table: dict[str, Any], path: Path, *, allow_mode
+             raise _error(path, name, "options", "must be a TOML table")
+         if not 2 <= len(options) <= 255:
+             raise _error(path, name, "options", "must contain between 2 and 255 options")
+-        parsed_options: dict[str, Any | None] = {}
++        parsed_options: dict[str, JSONContent | None] = {}
+         for label, description in options.items():
+             if not isinstance(label, str) or not label.strip():
+                 raise _error(path, name, "options", "labels must be nonempty strings")
+-            if not _json_compatible(description):
+-                raise _error(path, name, f"options.{label}", "must be JSON-compatible")
+-            parsed_options[label] = description
++            parsed_options[label] = _json_content(
++                description,
++                path,
++                name,
++                f"options.{label}",
++                allow_none=True,
++            )
+         return ChoiceDecision(name=name, question=question, options=parsed_options, model=model)
+
+     allowed = {"type", "question", "levels"}
+@@ -198,9 +237,8 @@ def _parse_primitive(name: str, table: dict[str, Any], path: Path, *, allow_mode
+         raise _error(path, name, "levels", "must be an array")
+     if not 2 <= len(levels) <= 10:
+         raise _error(path, name, "levels", "must contain between 2 and 10 levels")
+-    if not all(_json_compatible(level) for level in levels):
+-        raise _error(path, name, "levels", "must contain only JSON-compatible values")
+-    return ScoreDecision(name=name, question=question, levels=tuple(levels), model=model)
++    parsed_levels = tuple(_json_content(level, path, name, f"levels[{index}]") for index, level in enumerate(levels))
++    return ScoreDecision(name=name, question=question, levels=parsed_levels, model=model)
+
+
+ def _parse_decision(name: str, raw: Any, path: Path) -> Decision:
+@@ -220,8 +258,8 @@ def _parse_decision(name: str, raw: Any, path: Path) -> Decision:
+             question_table = _require_table(raw_question, path, f"{name}.{question_name}", "question")
+             questions[question_name] = _parse_primitive(question_name, question_table, path, allow_model=False)
+         return BundleDecision(name=name, questions=questions, model=_model(table, path, name))
+-    if kind not in {"noul", "choice", "score"}:
+-        raise _error(path, name, "type", "must be exactly noul, choice, score, or bundle")
++    if kind not in {"noul", "choice", "score", "box"}:
++        raise _error(path, name, "type", "must be exactly noul, choice, score, box, or bundle")
+     return _parse_primitive(name, table, path)
+
+
+@@ -301,6 +339,8 @@ def decision_to_dict(decision: Decision) -> dict[str, Any]:
+             "question": decision.question,
+             "options": decision.options,
+         }
++    elif isinstance(decision, BoxDecision):
++        result = {"name": decision.name, "type": "box", "question": decision.question}
+     else:
+         result = {
+             "name": decision.name,
+diff --git a/pyjev/pipeline.py b/pyjev/pipeline.py
+index 1c88a80..ee6f6b4 100644
+--- a/pyjev/pipeline.py
++++ b/pyjev/pipeline.py
+@@ -6,7 +6,7 @@ import math
+ from dataclasses import dataclass
+ from typing import Any, Generic, Literal, TypeAlias, TypeVar
+
+-from .results import BundleResult, ChoiceResult, NoulResult, PrimitiveResult, ScoreResult
++from .results import BoxResult, BundleResult, ChoiceResult, NoulResult, PrimitiveResult, ScoreResult
+
+ InputT = TypeVar("InputT")
+ OutputT = TypeVar("OutputT")
+@@ -30,7 +30,7 @@ class GateEvidence:
+     """The signal and threshold used by a local gate."""
+
+     signal: Literal["confidence", "probability"]
+-    observed: float
++    observed: float | None
+     comparator: Literal["at_least", "at_most"]
+     threshold: float
+
+@@ -110,15 +110,15 @@ class AnswerStage(PipeStage[BundleResult, PrimitiveResult]):
+
+
+ @dataclass(frozen=True, slots=True)
+-class ConfidenceGateStage(PipeStage[ChoiceResult | ScoreResult, GateOutcome]):
+-    """Gate a Choice or Score result using its Jev confidence signal."""
++class ConfidenceGateStage(PipeStage[ChoiceResult | ScoreResult | BoxResult, GateOutcome]):
++    """Gate a Choice, Score, or Box result using its Jev confidence signal."""
+
+     minimum: float
+
+-    def apply(self, value: ChoiceResult | ScoreResult) -> GateOutcome:
+-        if not isinstance(value, (ChoiceResult, ScoreResult)):
++    def apply(self, value: ChoiceResult | ScoreResult | BoxResult) -> GateOutcome:
++        if not isinstance(value, (ChoiceResult, ScoreResult, BoxResult)):
+             raise PipelineTypeError(
+-                f"require_confidence expected ChoiceResult or ScoreResult, got {type(value).__name__}"
++                f"require_confidence expected ChoiceResult, ScoreResult, or BoxResult, got {type(value).__name__}"
+             )
+         gate = GateEvidence(
+             signal="confidence",
+@@ -126,6 +126,8 @@ class ConfidenceGateStage(PipeStage[ChoiceResult | ScoreResult, GateOutcome]):
+             comparator="at_least",
+             threshold=self.minimum,
+         )
++        if value.confidence is None:
++            return Rejected(result=value, gate=gate)
+         if value.confidence >= self.minimum:
+             return Accepted(value=value.value, result=value, gate=gate)
+         return Rejected(result=value, gate=gate)
+@@ -169,7 +171,7 @@ def answer(name: str) -> AnswerStage:
+
+
+ def require_confidence(minimum: float) -> ConfidenceGateStage:
+-    """Create an inclusive confidence gate for Choice or Score results."""
++    """Create an inclusive confidence gate for Choice, Score, or Box results."""
+     return ConfidenceGateStage(minimum=_validate_threshold(minimum, "confidence threshold"))
+
+
+diff --git a/pyjev/results.py b/pyjev/results.py
+index aac7f43..5156c46 100644
+--- a/pyjev/results.py
++++ b/pyjev/results.py
+@@ -3,7 +3,7 @@
+ from __future__ import annotations
+
+ from dataclasses import dataclass
+-from typing import Any, TypeAlias
++from typing import Any, TypeAlias, TypedDict
+
+
+ @dataclass(frozen=True, slots=True)
+@@ -56,7 +56,37 @@ class ScoreResult:
+         return {**self.raw, "model": self.model, "usage": self.usage, "request_id": self.request_id}
+
+
+-PrimitiveResult: TypeAlias = NoulResult | ChoiceResult | ScoreResult
++class BoxCoordinates(TypedDict):
++    """Normalized top, bottom, left, and right image coordinates."""
++
++    top: float
++    bottom: float
++    left: float
++    right: float
++
++
++@dataclass(frozen=True, slots=True)
++class BoxResult:
++    """A normalized image box, confidence, and response metadata."""
++
++    value: BoxCoordinates
++    confidence: float | None
++    model: str
++    usage: dict[str, Any]
++    raw: dict[str, Any]
++    request_id: str | None = None
++
++    @property
++    def box(self) -> BoxCoordinates:
++        """Return the normalized box coordinates."""
++        return self.value
++
++    def to_dict(self) -> dict[str, Any]:
++        """Return the raw answer with shared response metadata."""
++        return {**self.raw, "model": self.model, "usage": self.usage, "request_id": self.request_id}
++
++
++PrimitiveResult: TypeAlias = NoulResult | ChoiceResult | ScoreResult | BoxResult
+
+
+ @dataclass(frozen=True, slots=True)
+diff --git a/pyproject.toml b/pyproject.toml
+index 0f97571..f864bb4 100644
+--- a/pyproject.toml
++++ b/pyproject.toml
+@@ -25,7 +25,7 @@ classifiers = [
+   "Topic :: Software Development :: Libraries :: Python Modules",
+ ]
+ dependencies = [
+-  "typesafe-sdk>=0.7.5,<1",
++  "typesafe-sdk>=0.7.6,<1",
+   "typer>=0.16,<1",
+   "keyring>=25,<26",
+   "tomli>=2; python_version < '3.11'",
+@@ -74,6 +74,7 @@ pythonpath = ["."]
+ [tool.ruff]
+ target-version = "py310"
+ line-length = 120
++extend-exclude = ["pyjev_box_advanced_support_implementation_brief.md"]
+
+ [tool.ruff.lint]
+ select = ["E", "F", "I", "UP", "B"]
+diff --git a/skills/pyjev/SKILL.md b/skills/pyjev/SKILL.md
+index 91d4f53..7309ef0 100644
+--- a/skills/pyjev/SKILL.md
++++ b/skills/pyjev/SKILL.md
+@@ -101,4 +101,12 @@ CLI. Never retry a low-confidence result as if it were a transport error.
+
+ ## Experimental image inputs
+
+-Use the official SDK `Image` through pyjev's Python API with explicit `Jev(images=True)` or `AsyncJev(images=True)`. This feature is experimental upstream; named references use `assets=`. Do not invent image/base64 serialization or multipart transport. Let `typesafe-sdk` own asset handling and follow the project's data policy for image content.
++## Structured question content
++
++Prefer objects and arrays when named fields, relationships, or an existing schema make the question clearer. Keep content structured in Python and named schema-1 contracts; do not serialize objects into prompt strings. pyjev uses the official SDK `Content` and `JSONContent` aliases. The SDK validates primitive schemas and owns serialization and transport. See `docs/structured-content.md` for supported fields and examples.
++
++## Experimental image inputs and Box
++
++Use the official SDK `Image` through pyjev's Python API with explicit `Jev(images=True)` or `AsyncJev(images=True)`. Box returns one set of coordinates and has no not-found outcome. Pair Box with a Noul in the same bundle when target presence matters, and choose thresholds in caller policy. Keep the Box result and confidence visible for review; do not invent a universal threshold.
++
++Named Box contracts can be inspected and compiled offline. The CLI does not upload images or execute live Box requests. Do not add image/base64 serialization or implement multipart transport. Let `typesafe-sdk` own question models, assets, serialization, and transport, and follow the project's policy for image content.
+diff --git a/tests/test_async.py b/tests/test_async.py
+index a1e3c1d..3c7930b 100644
+--- a/tests/test_async.py
++++ b/tests/test_async.py
+@@ -20,8 +20,15 @@ class AsyncResponse:
+     request_id = "async-request"
+     usage = Dumpable(input_tokens=4, output_tokens=2)
+
++    boxes = {
++        "answer": Dumpable(
++            box=Dumpable(top=0.12, bottom=0.77, left=0.06, right=0.22),
++            confidence=None,
++        )
++    }
++
+     def __init__(self):
+-        self.nouls = {}
++        self.nouls = {"answer": Dumpable(type="noul", noul=0.82)}
+         self.choices = {
+             "answer": Dumpable(
+                 type="choice",
+@@ -30,7 +37,15 @@ class AsyncResponse:
+                 probabilities={"yes": 0.9, "no": 0.1},
+             )
+         }
+-        self.scores = {}
++        self.scores = {
++            "answer": Dumpable(
++                type="score",
++                score=2.4,
++                confidence=0.87,
++                probabilities={0: 0.1, 1: 0.2, 2: 0.3, 3: 0.4},
++                legend={0: "low", 1: "normal", 2: "urgent", 3: "critical"},
++            )
++        }
+
+     def model_dump(self, mode: str = "python"):
+         del mode
+@@ -42,8 +57,9 @@ class AsyncClient:
+         self.calls = []
+         self.closed = False
+
+-    async def system_one(self, *, state, questions, model=None):
++    async def system_one(self, *, state, questions, model=None, **kwargs):
+         self.calls.append((state, questions, model))
++        self.last_kwargs = kwargs
+         return AsyncResponse()
+
+     async def aclose(self):
+@@ -128,3 +144,53 @@ def test_async_evaluate_bundle_uses_one_request_and_preserves_child_types():
+         assert len(client.calls) == 1
+
+     asyncio.run(run())
++
++
++def test_async_box_uses_native_sdk_client_and_preserves_nullable_confidence() -> None:
++    async def run() -> None:
++        client = AsyncClient()
++        image = object()
++        assets = {"<reference>": image}
++        question = {"target": "mug", "image": "photo"}
++        result = await AsyncJev(client=_as_client(client), images=True).box(
++            question,
++            state={"photo": image},
++            assets=assets,
++        )
++
++        assert result.box == {"top": 0.12, "bottom": 0.77, "left": 0.06, "right": 0.22}
++        assert result.confidence is None
++        assert len(client.calls) == 1
++        assert client.calls[0][1]["answer"].instructions == question
++        assert client.last_kwargs["assets"] is assets
++        assert client.last_kwargs["extra_headers"] == {"TypeSafe-Danger-Zone-Images": "true"}
++
++    asyncio.run(run())
++
++
++def test_async_structured_noul_choice_and_score_content_is_preserved() -> None:
++    async def run() -> None:
++        client = AsyncClient()
++        jev = AsyncJev(client=_as_client(client))
++        noul_question = {"task": "Check the sender", "compare": ["name", "email"]}
++        true = {"definition": "Identity conflict"}
++        false = {"definition": "No material conflict"}
++        await jev.noul(noul_question, state={"ticket": "details"}, true=true, false=false)
++
++        choice_question = {"task": "Route", "fields": ["subject", "body"]}
++        choices = {"billing": {"covers": ["refund"]}, "engineering": {"covers": ["bug"]}}
++        await jev.choice(choice_question, state={"ticket": "details"}, choices=choices)
++
++        score_question = {"task": "Rate urgency", "signals": ["impact", "blocked work"]}
++        levels = [{"label": "routine"}, {"label": "critical"}]
++        await jev.score(score_question, state={"ticket": "details"}, levels=levels)
++
++        noul_sdk, choice_sdk, score_sdk = (call[1]["answer"] for call in client.calls)
++        assert noul_sdk.instructions == noul_question
++        assert noul_sdk.criteria == {"true": true, "false": false}
++        assert choice_sdk.instructions == choice_question
++        assert choice_sdk.criteria == choices
++        assert score_sdk.instructions == score_question
++        assert score_sdk.criteria == levels
++
++    asyncio.run(run())
+diff --git a/tests/test_bundles.py b/tests/test_bundles.py
+index e3404fe..685f416 100644
+--- a/tests/test_bundles.py
++++ b/tests/test_bundles.py
+@@ -6,9 +6,20 @@ from typing import cast
+
+ import pytest
+ from typer.testing import CliRunner
+-from typesafe_sdk import TypeSafeClient
++from typesafe_sdk import Box, TypeSafeClient
+
+-from pyjev import BundleResult, ChoiceDecision, ChoiceResult, Jev, NoulDecision, NoulResult, ScoreDecision, ScoreResult
++from pyjev import (
++    BoxDecision,
++    BoxResult,
++    BundleResult,
++    ChoiceDecision,
++    ChoiceResult,
++    Jev,
++    NoulDecision,
++    NoulResult,
++    ScoreDecision,
++    ScoreResult,
++)
+ from pyjev.cli import app
+ from pyjev.decisions import BundleDecision, DecisionConfigError, load_decision
+
+@@ -166,3 +177,82 @@ def test_bundle_cli_rejects_value_and_confidence_before_api(tmp_path: Path, monk
+     assert "not valid for bundle" in value_result.output
+     assert confidence_result.exit_code != 0
+     assert "not valid for bundle" in confidence_result.output
++
++
++class MixedBoxAnswer:
++    def __init__(self, offset: float):
++        self.box = Dumpable(top=0.1, bottom=0.8, left=offset, right=offset + 0.2)
++        self.confidence = 0.86
++
++    def model_dump(self, mode: str = "python"):
++        del mode
++        return {
++            "type": "box",
++            "box": {"top": self.box.top, "bottom": self.box.bottom, "left": self.box.left, "right": self.box.right},
++            "confidence": self.confidence,
++        }
++
++
++class MixedBoxResponse:
++    model = "mixed-box-model"
++    request_id = "mixed-box-request"
++    usage = Dumpable(input_tokens=42, output_tokens=12)
++
++    def __init__(self, names: list[str]):
++        self.boxes = {
++            name: MixedBoxAnswer(0.05 * (index + 1)) for index, name in enumerate(names) if name.startswith("box-")
++        }
++        self.nouls = {name: Dumpable(type="noul", noul=0.8) for name in names if name.startswith("noul-")}
++        self.choices = {}
++        self.scores = {}
++
++    def model_dump(self, mode: str = "python"):
++        del mode
++        return {"model": self.model, "request_id": self.request_id}
++
++
++class MixedBoxClient:
++    def __init__(self):
++        self.calls = []
++        self.last_kwargs = {}
++
++    def system_one(self, **kwargs):
++        self.calls.append((kwargs["state"], kwargs["questions"], kwargs.get("model")))
++        self.last_kwargs = kwargs
++        return MixedBoxResponse(list(kwargs["questions"]))
++
++
++def test_mixed_three_box_three_noul_bundle_uses_one_request_and_preserves_results() -> None:
++    client = MixedBoxClient()
++    image = object()
++    assets = {"<reference>": object()}
++    decision = BundleDecision(
++        name="visual-inspection",
++        questions={
++            "box-water": BoxDecision("box-water", {"target": "water", "image": "photo"}),
++            "noul-drinkable": NoulDecision("noul-drinkable", {"task": "Is the drinkable item visible?"}),
++            "box-soda": BoxDecision("box-soda", {"target": "soda", "image": "photo"}),
++            "noul-party": NoulDecision("noul-party", {"task": "Are party supplies present?"}),
++            "box-hazard": BoxDecision("box-hazard", {"target": "hazard pictogram", "image": "photo"}),
++            "noul-soda": NoulDecision("noul-soda", {"task": "Is soda on the shelf?"}),
++        },
++    )
++
++    result = Jev(client=client, images=True).evaluate(decision, state={"photo": image}, assets=assets)
++
++    assert isinstance(result, BundleResult)
++    assert len(client.calls) == 1
++    assert list(result.answers) == list(decision.questions)
++    assert all(isinstance(result.answers[name], BoxResult) for name in ("box-water", "box-soda", "box-hazard"))
++    assert all(isinstance(result.answers[name], NoulResult) for name in ("noul-drinkable", "noul-party", "noul-soda"))
++    assert result.answers["box-water"].box["left"] == 0.05
++    assert result.answers["noul-drinkable"].value == 0.8
++    assert result.model == "mixed-box-model"
++    assert result.usage == {"input_tokens": 42, "output_tokens": 12}
++    assert result.request_id == "mixed-box-request"
++    sdk_questions = client.calls[0][1]
++    assert isinstance(sdk_questions["box-water"], Box)
++    assert sdk_questions["box-water"].instructions == {"target": "water", "image": "photo"}
++    assert client.last_kwargs["state"]["photo"] is image
++    assert client.last_kwargs["assets"] is assets
++    assert client.last_kwargs["extra_headers"] == {"TypeSafe-Danger-Zone-Images": "true"}
+diff --git a/tests/test_cli.py b/tests/test_cli.py
+index 62777b1..dcd18a9 100644
+--- a/tests/test_cli.py
++++ b/tests/test_cli.py
+@@ -1,4 +1,5 @@
+ import json
++from pathlib import Path
+ from types import SimpleNamespace
+
+ from typer.testing import CliRunner
+@@ -458,3 +459,95 @@ def test_run_supports_structured_pluck(monkeypatch):
+     )
+     assert result.exit_code == 0
+     assert result.stdout.strip() == "billing"
++
++
++def test_structured_decision_show_and_compile_preserve_json_content(tmp_path: Path) -> None:
++    config = tmp_path / ".pyjev.toml"
++    config.write_text(
++        """[decision.route]
++type = "choice"
++question = { task = "Route", fields = ["subject", "body"] }
++
++[decision.route.options.billing]
++covers = ["refund"]
++
++[decision.route.options.engineering]
++covers = ["bug"]
++""",
++        encoding="utf-8",
++    )
++
++    shown = runner.invoke(app, ["decision", "show", "route", "--config", str(config)])
++    assert shown.exit_code == 0
++    assert 'question={"fields": ["subject", "body"], "task": "Route"}' in shown.stdout
++    assert "{'task':" not in shown.stdout
++
++    shown_json = runner.invoke(app, ["decision", "show", "route", "--config", str(config), "--json"])
++    assert json.loads(shown_json.stdout)["question"] == {"task": "Route", "fields": ["subject", "body"]}
++
++    compiled = runner.invoke(
++        app,
++        ["decision", "compile", "route", "--config", str(config), "--state", '{"subject":"refund"}', "--state-json"],
++    )
++    assert compiled.exit_code == 0
++    payload = json.loads(compiled.stdout)
++    assert payload["request"]["questions"]["answer"]["instructions"] == {
++        "task": "Route",
++        "fields": ["subject", "body"],
++    }
++
++
++def test_named_box_cli_rejects_before_client_construction(tmp_path: Path, monkeypatch) -> None:
++    config = tmp_path / ".pyjev.toml"
++    config.write_text(
++        """[decision.find-logo]
++type = "box"
++question = "the logo in photo"
++
++[decision.visual-inspection]
++type = "bundle"
++
++[decision.visual-inspection.questions.location]
++type = "box"
++question = "the logo in photo"
++""",
++        encoding="utf-8",
++    )
++    monkeypatch.setattr(cli, "Jev", lambda **kwargs: (_ for _ in ()).throw(AssertionError("client was constructed")))
++
++    for name in ("find-logo", "visual-inspection"):
++        result = runner.invoke(app, ["decide", name, "--config", str(config), "--state", "photo"])
++        assert result.exit_code == cli.EXIT_USAGE
++        assert "Python API" in result.output
++        assert "Jev(images=True)" in result.output
++        assert "image input" in result.output
++
++
++def test_raw_box_cli_request_rejects_before_client_construction(monkeypatch) -> None:
++    monkeypatch.setattr(cli, "Jev", lambda **kwargs: (_ for _ in ()).throw(AssertionError("client was constructed")))
++    result = runner.invoke(
++        app,
++        ["run"],
++        input='{"state":"photo","questions":{"location":{"type":"box","instructions":"the logo"}}}',
++    )
++    assert result.exit_code == cli.EXIT_USAGE
++    assert "Python API" in result.output
++    assert "Jev(images=True)" in result.output
++
++
++def test_text_structured_named_decision_remains_cli_executable(tmp_path: Path, monkeypatch) -> None:
++    config = tmp_path / ".pyjev.toml"
++    config.write_text(
++        '[decision.route]\ntype="choice"\nquestion={task="Route",fields=["subject","body"]}\n'
++        '[decision.route.options]\nbilling="Billing"\nengineering="Engineering"\n',
++        encoding="utf-8",
++    )
++    monkeypatch.setattr(
++        cli,
++        "_run_api",
++        lambda action, *, model=None: FakeChoiceJev().choice(None, state=None, choices=None),
++    )
++
++    result = runner.invoke(app, ["decide", "route", "--config", str(config), "--state", "ticket"])
++    assert result.exit_code == 0
++    assert "choice=engineering" in result.stdout
+diff --git a/tests/test_client.py b/tests/test_client.py
+index 575e03c..c762705 100644
+--- a/tests/test_client.py
++++ b/tests/test_client.py
+@@ -223,3 +223,34 @@ def test_evaluate_rejects_invalid_runtime_decision_before_request():
+     with pytest.raises(ValueError, match="between 2 and 255"):
+         Jev(client=_as_client(client)).evaluate(decision, state="ticket")
+     assert client.calls == []
++
++
++def test_sync_structured_choice_content_is_preserved() -> None:
++    client = FakeClient()
++    question = {"task": "Route the ticket", "fields": ["subject", "body"]}
++    choices = {"billing": {"covers": ["refund"]}, "engineering": {"covers": ["bug"]}}
++
++    Jev(client=_as_client(client)).choice(question, state={"subject": "refund"}, choices=choices)
++
++    sdk_question = client.calls[0][1]["answer"]
++    assert sdk_question.instructions == question
++    assert sdk_question.criteria == choices
++
++
++def test_sync_structured_noul_and_score_content_is_preserved() -> None:
++    client = FakeClient()
++    jev = Jev(client=_as_client(client))
++    question = {"task": "Check sender", "compare": ["name", "email"]}
++    true = {"definition": "Identity conflict"}
++    false = {"definition": "No material conflict"}
++    jev.noul(question, state={"ticket": "details"}, true=true, false=false)
++
++    score_question = {"task": "Rate urgency", "consider": ["impact", "blocked work"]}
++    levels = [{"label": "routine"}, {"label": "critical"}]
++    jev.score(score_question, state={"ticket": "details"}, levels=levels)
++
++    noul_sdk, score_sdk = (call[1]["answer"] for call in client.calls)
++    assert noul_sdk.instructions == question
++    assert noul_sdk.criteria == {"true": true, "false": false}
++    assert score_sdk.instructions == score_question
++    assert score_sdk.criteria == levels
+diff --git a/tests/test_compile.py b/tests/test_compile.py
+index e4cc8cb..bf83ab9 100644
+--- a/tests/test_compile.py
++++ b/tests/test_compile.py
+@@ -4,8 +4,9 @@ import json
+ from pathlib import Path
+
+ from typer.testing import CliRunner
++from typesafe_sdk import Box
+
+-from pyjev import compile_decision
++from pyjev import BoxDecision, compile_decision
+ from pyjev.cli import app
+
+ runner = CliRunner()
+@@ -83,3 +84,48 @@ def test_fingerprint_ignores_config_path_but_changes_with_specification(tmp_path
+     second_path.write_text(changed, encoding="utf-8")
+     changed_decision = compile_decision("route", state="state", config=second_path)
+     assert changed_decision.fingerprint != first.fingerprint
++
++
++def test_compile_preserves_structured_choice_and_box_questions(tmp_path: Path) -> None:
++    path = tmp_path / ".pyjev.toml"
++    path.write_text(
++        """[decision.route]
++type = "choice"
++question = { task = "Route", fields = ["subject", "body"] }
++
++[decision.route.options.billing]
++covers = ["refund"]
++
++[decision.route.options.engineering]
++covers = ["bug"]
++
++[decision.find-mug]
++type = "box"
++
++[decision.find-mug.question]
++target = "mug"
++image = "photo"
++""",
++        encoding="utf-8",
++    )
++
++    choice = compile_decision("route", state="ticket", config=path)
++    assert choice.to_dict()["request"]["questions"]["answer"] == {
++        "type": "choice",
++        "instructions": {"task": "Route", "fields": ["subject", "body"]},
++        "criteria": {"billing": {"covers": ["refund"]}, "engineering": {"covers": ["bug"]}},
++    }
++
++    box = compile_decision("find-mug", state={"photo": "local placeholder"}, config=path)
++    assert isinstance(box.questions["answer"], Box)
++    assert box.to_dict()["request"]["questions"]["answer"] == {
++        "type": "box",
++        "instructions": {"target": "mug", "image": "photo"},
++    }
++
++
++def test_runtime_decision_validation_accepts_structured_box() -> None:
++    from pyjev.compile import validate_runtime_decision
++
++    decision = BoxDecision("find-mug", {"target": "mug", "image": "photo"})
++    assert validate_runtime_decision(decision) is decision
+diff --git a/tests/test_decisions.py b/tests/test_decisions.py
+index 804d3be..ee5992d 100644
+--- a/tests/test_decisions.py
++++ b/tests/test_decisions.py
+@@ -5,10 +5,12 @@ from pathlib import Path
+ import pytest
+
+ from pyjev.decisions import (
++    BoxDecision,
+     ChoiceDecision,
+     DecisionConfigError,
+     NoulDecision,
+     ScoreDecision,
++    decision_spec_fingerprint,
+     find_config,
+     load_config,
+     load_decision,
+@@ -133,3 +135,120 @@ def test_missing_schema_is_implicit_schema_one(tmp_path: Path) -> None:
+ def test_invalid_schema_is_rejected_before_decisions(tmp_path: Path, text: str) -> None:
+     with pytest.raises(DecisionConfigError, match=r"schema|unknown"):
+         load_decisions(write_config(tmp_path, text))
++
++
++def test_loads_structured_questions_criteria_and_box(tmp_path: Path) -> None:
++    path = write_config(
++        tmp_path,
++        """
++[decision.noul]
++type = "noul"
++question = { task = "Check sender", compare = ["name", "email"] }
++true = { definition = "Conflict", examples = ["mismatch"] }
++false = { definition = "Consistent" }
++
++[decision.choice]
++type = "choice"
++question = { task = "Route", fields = ["subject", "body"] }
++
++[decision.choice.options.billing]
++covers = ["refund", "invoice"]
++
++[decision.choice.options.engineering]
++covers = ["bug"]
++
++[decision.score]
++type = "score"
++question = { task = "Rate urgency" }
++levels = [
++  { label = "routine", signals = ["informational"] },
++  { label = "critical", signals = ["blocked"] },
++]
++
++[decision.box]
++type = "box"
++
++[decision.box.question]
++target = "mug"
++image = "photo"
++""",
++    )
++
++    decisions = load_decisions(path)
++    assert decisions["noul"].question == {"task": "Check sender", "compare": ["name", "email"]}
++    assert decisions["noul"].true == {"definition": "Conflict", "examples": ["mismatch"]}
++    assert decisions["noul"].false == {"definition": "Consistent"}
++    assert decisions["choice"].options == {
++        "billing": {"covers": ["refund", "invoice"]},
++        "engineering": {"covers": ["bug"]},
++    }
++    assert decisions["score"].levels == (
++        {"label": "routine", "signals": ["informational"]},
++        {"label": "critical", "signals": ["blocked"]},
++    )
++    assert isinstance(decisions["box"], BoxDecision)
++    assert decisions["box"].question == {"target": "mug", "image": "photo"}
++
++
++@pytest.mark.parametrize(
++    "question",
++    ["42", "{ due = 2026-05-15 }", "{ threshold = nan }"],
++)
++def test_structured_question_rejects_invalid_roots_and_non_json_values(tmp_path: Path, question: str) -> None:
++    config = write_config(tmp_path, f'[decision.bad]\ntype = "noul"\nquestion = {question}\n')
++    with pytest.raises(DecisionConfigError, match="JSON-compatible"):
++        load_decisions(config)
++
++
++def test_structured_fingerprint_sorts_objects_but_preserves_arrays(tmp_path: Path) -> None:
++    first_dir = tmp_path / "first"
++    second_dir = tmp_path / "second"
++    changed_dir = tmp_path / "changed"
++    first_dir.mkdir()
++    second_dir.mkdir()
++    changed_dir.mkdir()
++    first = write_config(
++        first_dir,
++        '[decision.structured]\ntype="noul"\nquestion={task="Check", nested={left=1, right=2}, fields=["a", "b"]}\n',
++    )
++    second = write_config(
++        second_dir,
++        '[decision.structured]\ntype="noul"\nquestion={fields=["a", "b"], nested={right=2, left=1}, task="Check"}\n',
++    )
++    changed = write_config(
++        changed_dir,
++        '[decision.structured]\ntype="noul"\nquestion={task="Check", nested={left=1, right=3}, fields=["a", "b"]}\n',
++    )
++    assert decision_spec_fingerprint(load_decision("structured", first)) == decision_spec_fingerprint(
++        load_decision("structured", second)
++    )
++    assert decision_spec_fingerprint(load_decision("structured", first)) != decision_spec_fingerprint(
++        load_decision("structured", changed)
++    )
++    array_changed_dir = tmp_path / "array-changed"
++    array_changed_dir.mkdir()
++    array_changed = write_config(
++        array_changed_dir,
++        '[decision.structured]\ntype="noul"\nquestion={task="Check", nested={left=1, right=2}, fields=["b", "a"]}\n',
++    )
++    assert decision_spec_fingerprint(load_decision("structured", first)) != decision_spec_fingerprint(
++        load_decision("structured", array_changed)
++    )
++
++
++def test_score_level_order_changes_fingerprint(tmp_path: Path) -> None:
++    first_dir = tmp_path / "first"
++    second_dir = tmp_path / "second"
++    first_dir.mkdir()
++    second_dir.mkdir()
++    first = write_config(
++        first_dir,
++        '[decision.rate]\ntype="score"\nquestion="Rate"\nlevels=[{label="low"}, {label="high"}]\n',
++    )
++    second = write_config(
++        second_dir,
++        '[decision.rate]\ntype="score"\nquestion="Rate"\nlevels=[{label="high"}, {label="low"}]\n',
++    )
++    assert decision_spec_fingerprint(load_decision("rate", first)) != decision_spec_fingerprint(
++        load_decision("rate", second)
++    )
+diff --git a/tests/test_docs.py b/tests/test_docs.py
+index aa29267..0500e24 100644
+--- a/tests/test_docs.py
++++ b/tests/test_docs.py
+@@ -115,3 +115,24 @@ def test_image_documentation_covers_opt_in_and_experimental_status() -> None:
+     assert "dreamer-ready" in images.lower()
+     assert "assets=" in images
+     assert "images" in index
++
++
++def test_box_and_structured_content_documentation_boundaries() -> None:
++    readme = (ROOT / "README.md").read_text(encoding="utf-8").lower()
++    structured = ROOT / "docs" / "structured-content.md"
++    images = (ROOT / "docs" / "images.md").read_text(encoding="utf-8").lower()
++    confidence = (ROOT / "docs" / "confidence.md").read_text(encoding="utf-8").lower()
++    named = (ROOT / "docs" / "named-decisions.md").read_text(encoding="utf-8").lower()
++    why = (ROOT / "docs" / "why-pyjev.md").read_text(encoding="utf-8").lower()
++    docs_guidance = (ROOT / "docs" / "agent-skill.md").read_text(encoding="utf-8").lower()
++    skill = (ROOT / "skills" / "pyjev" / "SKILL.md").read_text(encoding="utf-8").lower()
++
++    assert "box" in readme and "structured question content" in readme
++    assert structured.exists()
++    assert "https://docs.typesafe.ai/primitives/advanced" in structured.read_text(encoding="utf-8")
++    assert "box" in images and "not found" in images and "noul" in images
++    assert "box" in confidence
++    assert "structured" in named
++    assert "bundles of those primitives, not typesafe's `box` primitive" not in why
++    assert "box" in docs_guidance and "structured" in docs_guidance
++    assert "box" in skill and "structured" in skill
+diff --git a/tests/test_images.py b/tests/test_images.py
+index 7059a00..170510b 100644
+--- a/tests/test_images.py
++++ b/tests/test_images.py
+@@ -2,6 +2,7 @@ from __future__ import annotations
+
+ from types import SimpleNamespace
+
++import pytest
+ from typesafe_sdk import Image as SDKImage
+
+ from pyjev import Image, decide
+@@ -53,6 +54,12 @@ class _ImageResponse:
+     model = "image-test"
+     request_id = "image-request"
+     usage = _Dumpable(input_tokens=10, output_tokens=2)
++    boxes = {
++        "answer": _Dumpable(
++            box=_Dumpable(top=0.12, bottom=0.77, left=0.06, right=0.22),
++            confidence=0.86,
++        )
++    }
+     nouls = {"answer": _Dumpable(noul=0.91)}
+     choices = {
+         "answer": _Dumpable(
+@@ -251,3 +258,163 @@ def test_async_decision_methods_forward_named_assets(tmp_path) -> None:
+         assert all("extra_headers" not in call for call in client.calls)
+
+     asyncio.run(run())
++
++
++def test_sync_box_preserves_structured_request_coordinates_and_assets() -> None:
++    from typesafe_sdk import Box as SDKBox
++
++    from pyjev import BoxResult, Jev
++
++    image = Image(b"photo bytes")
++    reference = Image(b"reference bytes")
++    assets = {"<reference>": reference}
++    question = {"target": "mug", "image": "photo"}
++    client = _SyncImageClient()
++
++    result = Jev(client=client, images=True).box(question, state={"photo": image}, assets=assets)
++
++    call = client.calls[0]
++    sdk_question = call["questions"]["answer"]
++    assert isinstance(result, BoxResult)
++    assert isinstance(sdk_question, SDKBox)
++    assert sdk_question.instructions == question
++    assert sdk_question.model_dump(mode="json") == {"type": "box", "instructions": question}
++    assert call["state"]["photo"] is image
++    assert call["assets"] is assets
++    assert call["extra_headers"] == {"TypeSafe-Danger-Zone-Images": "true"}
++    assert result.box == {"top": 0.12, "bottom": 0.77, "left": 0.06, "right": 0.22}
++    assert result.confidence == 0.86
++    assert result.request_id == "image-request"
++
++
++def test_sync_box_requires_explicit_image_opt_in_before_request() -> None:
++    from pyjev import Jev
++
++    client = _SyncImageClient()
++    with pytest.raises(ValueError, match="images=True"):
++        Jev(client=client).box("the mug", state="photo")
++    assert client.calls == []
++
++
++def test_async_box_requires_explicit_image_opt_in_before_request() -> None:
++    import asyncio
++
++    from pyjev import AsyncJev
++
++    async def run() -> None:
++        client = _AsyncImageClient()
++        with pytest.raises(ValueError, match="images=True"):
++            await AsyncJev(client=client).box("the mug", state="photo")
++        assert client.calls == []
++
++    asyncio.run(run())
++
++
++def test_box_decisions_and_raw_questions_require_image_opt_in() -> None:
++    from typesafe_sdk import Box
++
++    from pyjev import BoxDecision, BundleDecision, Jev, NoulDecision
++
++    client = _SyncImageClient()
++    jev = Jev(client=client)
++    with pytest.raises(ValueError, match="images=True"):
++        jev.evaluate(BoxDecision("location", "the mug"), state="photo")
++    with pytest.raises(ValueError, match="images=True"):
++        jev.evaluate(
++            BundleDecision(
++                "inspection",
++                {
++                    "visible": NoulDecision("visible", "Is a mug visible?"),
++                    "location": BoxDecision("location", "the mug"),
++                },
++            ),
++            state="photo",
++        )
++    with pytest.raises(ValueError, match="images=True"):
++        jev.run(state="photo", questions={"location": Box(instructions="the mug")})
++    with pytest.raises(ValueError, match="images=True"):
++        jev.run(state="photo", questions={"location": {"type": "box", "instructions": "the mug"}})
++    assert client.calls == []
++
++
++def test_async_box_decision_requires_image_opt_in_before_request() -> None:
++    import asyncio
++
++    from pyjev import AsyncJev, BoxDecision
++
++    async def run() -> None:
++        client = _AsyncImageClient()
++        with pytest.raises(ValueError, match="images=True"):
++            await AsyncJev(client=client).evaluate(BoxDecision("location", "the mug"), state="photo")
++        assert client.calls == []
++
++    asyncio.run(run())
++
++
++def test_named_box_decision_executes_with_image_opt_in(tmp_path) -> None:
++    from pyjev import BoxResult, Jev
++
++    config = tmp_path / ".pyjev.toml"
++    config.write_text(
++        '[decision.find-logo]\ntype = "box"\nquestion = { target = "logo", image = "photo" }\n',
++        encoding="utf-8",
++    )
++    client = _SyncImageClient()
++
++    result = Jev(client=client, images=True).decide("find-logo", state={"photo": Image(b"photo")}, config=config)
++
++    assert isinstance(result, BoxResult)
++    assert result.box["left"] == 0.06
++    assert client.calls[0]["questions"]["answer"].instructions == {"target": "logo", "image": "photo"}
++    assert client.calls[0]["extra_headers"] == {"TypeSafe-Danger-Zone-Images": "true"}
++
++
++def test_async_box_preserves_sdk_question_assets_and_image_header() -> None:
++    import asyncio
++
++    from typesafe_sdk import Box as SDKBox
++
++    from pyjev import AsyncJev, BoxResult
++
++    async def run() -> None:
++        image = Image(b"photo bytes")
++        reference = Image(b"reference bytes")
++        assets = {"<reference>": reference}
++        question = {"target": "mug", "image": "photo"}
++        client = _AsyncImageClient()
++        result = await AsyncJev(client=client, images=True).box(
++            question,
++            state={"photo": image},
++            assets=assets,
++        )
++
++        call = client.calls[0]
++        sdk_question = call["questions"]["answer"]
++        assert isinstance(result, BoxResult)
++        assert isinstance(sdk_question, SDKBox)
++        assert sdk_question.instructions == question
++        assert sdk_question.model_dump(mode="json") == {"type": "box", "instructions": question}
++        assert call["state"]["photo"] is image
++        assert call["assets"] is assets
++        assert call["extra_headers"] == {"TypeSafe-Danger-Zone-Images": "true"}
++        assert result.box == {"top": 0.12, "bottom": 0.77, "left": 0.06, "right": 0.22}
++        assert result.confidence == 0.86
++        assert result.request_id == "image-request"
++
++    asyncio.run(run())
++
++
++def test_public_content_aliases_and_box_types_are_exported() -> None:
++    from typesafe_sdk import Content as SDKContent
++    from typesafe_sdk import ContentValue as SDKContentValue
++    from typesafe_sdk import JSONContent as SDKJSONContent
++    from typesafe_sdk import JSONValue as SDKJSONValue
++
++    from pyjev import BoxDecision, BoxResult, Content, ContentValue, JSONContent, JSONValue
++
++    assert Content is SDKContent
++    assert ContentValue is SDKContentValue
++    assert JSONContent is SDKJSONContent
++    assert JSONValue is SDKJSONValue
++    assert BoxDecision.__name__ == "BoxDecision"
++    assert BoxResult.__name__ == "BoxResult"
+diff --git a/tests/test_pipeline.py b/tests/test_pipeline.py
+index 8f163b8..dcf89a9 100644
+--- a/tests/test_pipeline.py
++++ b/tests/test_pipeline.py
+@@ -6,7 +6,7 @@ import math
+ import pytest
+
+ import pyjev.pipeline as pipeline
+-from pyjev import BundleResult, ChoiceResult, NoulResult, ScoreResult
++from pyjev import BoxResult, BundleResult, ChoiceResult, NoulResult, ScoreResult
+ from pyjev.pipeline import (
+     Accepted,
+     PipelineLookupError,
+@@ -41,6 +41,16 @@ def score(value: float = 2.5, confidence: float = 0.85) -> ScoreResult:
+     )
+
+
++def box(confidence: float | None = 0.85) -> BoxResult:
++    return BoxResult(
++        value={"top": 0.1, "bottom": 0.8, "left": 0.05, "right": 0.25},
++        confidence=confidence,
++        model="test-model",
++        usage={},
++        raw={"confidence": confidence},
++    )
++
++
+ def noul(value: float = 0.85) -> NoulResult:
+     return NoulResult(value=value, model="test-model", usage={}, raw={"noul": value})
+
+@@ -129,9 +139,28 @@ def test_confidence_gate_accepts_score() -> None:
+     assert outcome.result is result
+
+
++@pytest.mark.parametrize(
++    ("confidence", "expected_pass"),
++    [(0.86, True), (0.80, True), (0.79, False), (None, False)],
++)
++def test_confidence_gate_handles_box_confidence(confidence: float | None, expected_pass: bool) -> None:
++    result = box(confidence)
++
++    outcome = result | require_confidence(0.80)
++
++    assert outcome.passed is expected_pass
++    assert outcome.result is result
++    assert outcome.gate.observed is confidence
++    if expected_pass:
++        assert isinstance(outcome, Accepted)
++        assert outcome.value == result.box
++    else:
++        assert isinstance(outcome, Rejected)
++
++
+ @pytest.mark.parametrize("result", [noul(), bundle(intent=choice())])
+ def test_confidence_gate_rejects_incompatible_result_types(result: object) -> None:
+-    with pytest.raises(PipelineTypeError, match="ChoiceResult or ScoreResult"):
++    with pytest.raises(PipelineTypeError, match="ChoiceResult, ScoreResult, or BoxResult"):
+         result | require_confidence(0.70)
