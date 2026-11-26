@@ -6,7 +6,7 @@ import json
 import os
 import sys
 from collections.abc import Callable
-from enum import Enum
+from enum import StrEnum
 from pathlib import Path
 from typing import Any, TypeVar
 
@@ -449,7 +449,7 @@ def decide(
     )
 
 
-class CredentialStorage(str, Enum):
+class CredentialStorage(StrEnum):
     auto = "auto"
     keyring = "keyring"
     file = "file"

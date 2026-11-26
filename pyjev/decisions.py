@@ -5,16 +5,12 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, TypeAlias
 
 from typesafe_sdk import JSONContent
-
-try:  # Python 3.11+
-    import tomllib
-except ModuleNotFoundError:  # pragma: no cover - exercised on Python 3.10
-    import tomli as tomllib  # type: ignore[import-not-found, no-redef]
 
 
 class DecisionConfigError(ValueError):
